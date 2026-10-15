@@ -1,0 +1,6 @@
+node_modules/
+.test-magpie/
+*.tgz
+.env
+*.local.json
+.DS_Store

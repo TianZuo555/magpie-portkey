@@ -1,0 +1,64 @@
+{
+  "name": "magpie-portkey",
+  "version": "1.0.0",
+  "description": "Portkey AWS Bedrock provider for Magpie and pi, with tools, vision, reasoning and prompt caching.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TianZuo555/magpie-portkey.git"
+  },
+  "homepage": "https://github.com/TianZuo555/magpie-portkey#readme",
+  "bugs": {
+    "url": "https://github.com/TianZuo555/magpie-portkey/issues"
+  },
+  "type": "module",
+  "main": "./index.ts",
+  "magpie": {
+    "icon": "https://raw.githubusercontent.com/TianZuo555/magpie-portkey/main/icon.svg"
+  },
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "magpie-plugin",
+    "provider",
+    "magpie",
+    "portkey",
+    "bedrock"
+  ],
+  "files": [
+    "index.ts",
+    "config.json",
+    "models.json",
+    "README.md",
+    "LICENSE",
+    "icon.svg",
+    "docs/marketplace.md"
+  ],
+  "engines": {
+    "node": ">=22.19",
+    "bun": ">=1.3"
+  },
+  "scripts": {
+    "test": "bun test test/",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "@ai-sdk/amazon-bedrock": "5.0.57",
+    "ai": "7.0.66"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@types/node": "^26.0.0",
+    "typescript": "^5.9.3"
+  }
+}

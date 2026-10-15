@@ -1,0 +1,32 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - uses: actions/checkout@v4
+        with:
+          repository: yetone/magpie
+          ref: 37fec124095cc3ff91960d3f4e6fa2d010b4044b
+          path: .test-magpie
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+        env:
+          MAGPIE_SOURCE_DIR: ${{ github.workspace }}/.test-magpie
+      - run: npm pack --dry-run
