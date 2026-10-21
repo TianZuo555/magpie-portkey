@@ -1,0 +1,233 @@
+{
+ "code": 0,
+ "data": {
+  "models": [
+   {
+    "credits": "",
+    "id": "default-model",
+    "isDefault": true,
+    "maxAllowedSize": 200000,
+    "maxInputTokens": 176000,
+    "maxOutputTokens": 24000,
+    "name": "Auto",
+    "supportsImages": true,
+    "supportsToolCall": true,
+    "temperature": 1,
+    "vendor": "e"
+   },
+   {
+    "credits": "x0.34 credits",
+    "id": "fast-model",
+    "maxAllowedSize": 200000,
+    "maxInputTokens": 200000,
+    "maxOutputTokens": 32000,
+    "name": "Fast",
+    "onlyReasoning": true,
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "supportsImages": true,
+    "supportsReasoning": true,
+    "supportsToolCall": true,
+    "temperature": 1,
+    "vendor": "i"
+   },
+   {
+    "credits": "x3.31 credits",
+    "id": "primary-model",
+    "maxAllowedSize": 272000,
+    "maxInputTokens": 272000,
+    "maxOutputTokens": 72000,
+    "name": "Primary",
+    "onlyReasoning": true,
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "supportsImages": true,
+    "supportsReasoning": true,
+    "supportsToolCall": true,
+    "vendor": "e"
+   },
+   {
+    "contextWindow": {
+     "defaultLength": 300000,
+     "supportedLengths": [
+      300000,
+      1000000
+     ]
+    },
+    "credits": "x0.03",
+    "id": "deepseek-v4.1-flash-sg",
+    "maxAllowedSize": 1000000,
+    "maxInputTokens": 1000000,
+    "maxOutputTokens": 128000,
+    "name": "Deepseek-V4.1-Flash",
+    "onlyReasoning": true,
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "relatedModels": {
+     "lite": "deepseek-v4.1-flash-sg",
+     "reasoning": "deepseek-v4.1-flash-sg"
+    },
+    "supportsImages": true,
+    "supportsReasoning": true,
+    "supportsToolCall": true,
+    "temperature": 1,
+    "vendor": "f"
+   },
+   {
+    "credits": "x0.00",
+    "disabledMultimodal": false,
+    "id": "hy3",
+    "maxAllowedSize": 192000,
+    "maxInputTokens": 192000,
+    "maxOutputTokens": 64000,
+    "name": "Hy3",
+    "onlyReasoning": true,
+    "reasoning": {
+     "canDisableThinking": false,
+     "defaultEffort": "high",
+     "summary": "auto",
+     "supportedEfforts": [
+      "low",
+      "high"
+     ]
+    },
+    "relatedModels": {
+     "lite": "hy3",
+     "reasoning": "hy3"
+    },
+    "supportsImages": true,
+    "supportsReasoning": true,
+    "supportsToolCall": true,
+    "tags": [
+     "craft"
+    ],
+    "temperature": 0.9,
+    "top_p": 1,
+    "vendor": "j"
+   },
+   {
+    "credits": "x3.47",
+    "id": "gpt-5.6-sol",
+    "maxAllowedSize": 1000000,
+    "maxInputTokens": 1000000,
+    "maxOutputTokens": 128000,
+    "name": "GPT-5.6-Sol",
+    "onlyReasoning": false,
+    "reasoning": {
+     "canDisableThinking": true,
+     "defaultEffort": "high",
+     "summary": "auto",
+     "supportedEfforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    },
+    "relatedModels": {
+     "lite": "gpt-5.6-sol",
+     "reasoning": "gpt-5.6-sol"
+    },
+    "supportsImages": true,
+    "supportsReasoning": true,
+    "supportsToolCall": true,
+    "tags": [],
+    "vendor": "e"
+   },
+   {
+    "credits": "x0.99",
+    "id": "gemini-3.5-flash",
+    "maxAllowedSize": 1000000,
+    "maxInputTokens": 1000000,
+    "maxOutputTokens": 65536,
+    "name": "Gemini-3.5-Flash",
+    "onlyReasoning": true,
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "supportsImages": true,
+    "supportsReasoning": true,
+    "supportsToolCall": true,
+    "tags": [],
+    "temperature": 1,
+    "vendor": "e"
+   },
+   {
+    "credits": "x0.79",
+    "id": "glm-5.2",
+    "maxAllowedSize": 1000000,
+    "maxInputTokens": 1000000,
+    "maxOutputTokens": 48000,
+    "name": "GLM-5.2",
+    "onlyReasoning": false,
+    "reasoning": {
+     "canDisableThinking": true,
+     "defaultEffort": "high",
+     "summary": "auto",
+     "supportedEfforts": [
+      "high",
+      "xhigh"
+     ]
+    },
+    "relatedModels": {
+     "lite": "glm-5.2",
+     "reasoning": "glm-5.2"
+    },
+    "supportsImages": true,
+    "supportsReasoning": true,
+    "supportsToolCall": true,
+    "tags": [
+     "craft"
+    ],
+    "temperature": 1,
+    "vendor": "e"
+   },
+   {
+    "credits": "x1.62",
+    "id": "kimi-k3",
+    "maxAllowedSize": 1000000,
+    "maxInputTokens": 1000000,
+    "maxOutputTokens": 32000,
+    "name": "Kimi-K3",
+    "onlyReasoning": true,
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "relatedModels": {
+     "lite": "kimi-k3-1",
+     "reasoning": "kimi-k3-1"
+    },
+    "supportsImages": true,
+    "supportsReasoning": true,
+    "supportsToolCall": true,
+    "temperature": 1,
+    "vendor": "f"
+   }
+  ],
+  "agents": [
+   {
+    "name": "cli",
+    "models": [
+     "default-model",
+     "fast-model",
+     "primary-model",
+     "hy3",
+     "deepseek-v4.1-flash-sg",
+     "gpt-5.6-sol",
+     "gemini-3.5-flash",
+     "glm-5.2",
+     "kimi-k3"
+    ]
+   }
+  ]
+ }
+}

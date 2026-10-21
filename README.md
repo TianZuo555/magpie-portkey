@@ -5,7 +5,13 @@ Providers for [Magpie](https://github.com/yetone/magpie) and [pi](https://pi.dev
 | Folder | Provider ids | What it is |
 |---|---|---|
 | this folder | `portkey-aws` | AWS Bedrock through [Portkey](https://portkey.ai) |
-| [`workbuddy/`](workbuddy/) | `workbuddy`, `workbuddy-ai` | WorkBuddy's plans (Tencent's CodeBuddy agent), China build and international build |
+| [`workbuddy/`](workbuddy/) | `workbuddy`, `workbuddy-ai` | Backup of the original Magpie/OpenCode plugin, including desktop sign-in |
+
+The `workbuddy/` folder backs up the original plugin from
+[`magpie-community/plugins`](https://github.com/magpie-community/plugins/tree/af360a529df5295e9c31fefe81e3158802ca0f3a/packages/workbuddy),
+version `0.1.29`. It uses Magpie's native plugin hooks. Its source, package manifest,
+tests and README are copied unchanged; it has no pi extension manifest.
+See [backup provenance and local installation](workbuddy/BACKUP.md).
 
 ## Portkey AWS Bedrock
 

@@ -40,9 +40,8 @@
   "scripts": {
     "test": "bun test test/",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run typecheck:workbuddy && npm test && npm run test:workbuddy",
-    "test:workbuddy": "bun test workbuddy/test/",
-    "typecheck:workbuddy": "tsc --noEmit -p workbuddy/tsconfig.json"
+    "check": "npm run typecheck && npm test && npm run test:workbuddy",
+    "test:workbuddy": "workbuddy_test_home=$(mktemp -d) && trap 'rm -rf \"$workbuddy_test_home\"' EXIT && HOME=\"$workbuddy_test_home\" bun test workbuddy/"
   },
   "pi": {
     "extensions": [
