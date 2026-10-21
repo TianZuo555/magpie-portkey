@@ -1,0 +1,45 @@
+{
+  "name": "magpie-workbuddy",
+  "version": "0.1.0",
+  "description": "WorkBuddy plans for Magpie and pi: WorkBuddy (CodeBuddy, copilot.tencent.com) and WorkBuddy AI (www.workbuddy.ai)",
+  "type": "module",
+  "main": "./index.ts",
+  "magpie": {
+    "icon": "https://raw.githubusercontent.com/magpie-community/plugins/main/packages/workbuddy/icon.svg"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TianZuo555/magpie-portkey.git",
+    "directory": "workbuddy"
+  },
+  "keywords": [
+    "pi-package",
+    "magpie-plugin",
+    "provider",
+    "workbuddy",
+    "codebuddy"
+  ],
+  "files": [
+    "index.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.19",
+    "bun": ">=1.3"
+  },
+  "scripts": {
+    "test": "bun test test/",
+    "typecheck": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

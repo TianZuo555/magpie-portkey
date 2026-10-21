@@ -40,7 +40,9 @@
   "scripts": {
     "test": "bun test test/",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm run typecheck:workbuddy && npm test && npm run test:workbuddy",
+    "test:workbuddy": "bun test workbuddy/test/",
+    "typecheck:workbuddy": "tsc --noEmit -p workbuddy/tsconfig.json"
   },
   "pi": {
     "extensions": [

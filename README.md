@@ -1,6 +1,15 @@
 # magpie-portkey
 
-A [Magpie](https://github.com/yetone/magpie) provider for AWS Bedrock models through [Portkey](https://portkey.ai). It uses Magpie’s official pi package bridge and the Bedrock AI SDK transport. The same package also works in pi.
+Providers for [Magpie](https://github.com/yetone/magpie) and [pi](https://pi.dev).
+
+| Folder | Provider ids | What it is |
+|---|---|---|
+| this folder | `portkey-aws` | AWS Bedrock through [Portkey](https://portkey.ai) |
+| [`workbuddy/`](workbuddy/) | `workbuddy`, `workbuddy-ai` | WorkBuddy's plans (Tencent's CodeBuddy agent), China build and international build |
+
+## Portkey AWS Bedrock
+
+A provider for AWS Bedrock models through Portkey. It uses Magpie’s official pi package bridge and the Bedrock AI SDK transport. The same package also works in pi.
 
 The provider id is **`portkey-aws`**. Its models are available to every agent connected to Magpie.
 
