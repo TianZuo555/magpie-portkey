@@ -1,3 +1,5 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // plugins#255 (kylesean): eight models in WorkBuddy's /v3/config say
 // supportsReasoning and a default reasoning.effort but no
 // reasoning.supportedEfforts, so the plugin listed them as not reasoning.
@@ -5,15 +7,15 @@
 // descriptions left out), cut to those models and a few beside them.
 import { afterEach, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
-import { _internal } from "./index.mjs"
+import { _internal } from "./index.ts"
 
 const real = globalThis.fetch
-afterEach(() => (globalThis.fetch = real))
+afterEach(() => (setFetch(real)))
 
 const config = readFileSync(new URL("./testdata/config-efforts.json", import.meta.url), "utf8")
 
 async function listed() {
-  globalThis.fetch = async () => new Response(config)
+  setFetch(async () => new Response(config))
   const out = await _internal.liveModels(_internal.SITES["workbuddy-ai"], { access: "a", uid: "u" })
   return Object.fromEntries(out.map((m) => [m.id, m.efforts]))
 }

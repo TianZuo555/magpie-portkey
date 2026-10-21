@@ -1,5 +1,7 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 import { test, expect } from "bun:test"
-import { WorkBuddyAIAuthPlugin, _internal } from "./index.mjs"
+import { WorkBuddyAIAuthPlugin, _internal } from "./index.ts"
 
 // modelPromotions as copilot.tencent.com's /v3/config gave them on
 // 2026-10-14 (icons left out): Hy4 preview free 23:00–8:00 only, Hy3 free
@@ -41,7 +43,7 @@ test("without promotions a model is priced by its credits, as before", () => {
 // International /v3/config returned these aliases with a credits suffix on
 // 2026-10-17. Number("0.34 credits") loses an otherwise known multiplier.
 test("international credit units preserve alias rates and unknown prices", () => {
-  for (const [credits, rate] of [["x0.34 credits", 0.34], ["x0.59 credits", 0.59], ["x0.99 credits", 0.99], ["x0.00 credits", 0]]) {
+  for (const [credits, rate] of [["x0.34 credits", 0.34], ["x0.59 credits", 0.59], ["x0.99 credits", 0.99], ["x0.00 credits", 0]] as const) {
     expect(_internal.priceOf({ id: "fast-model", credits })).toEqual({ free: rate === 0, rate })
   }
   for (const credits of ["", "credits", "x0.34 bananas", "xNaN credits", "xInfinity credits", "x-1 credits"]) {
@@ -51,21 +53,21 @@ test("international credit units preserve alias rates and unknown prices", () =>
 
 test("browser model discovery carries unit-suffixed rates to the host", async () => {
   const real = globalThis.fetch
-  globalThis.fetch = async (input) => {
+  setFetch(async (input) => {
     expect(String(input)).toBe("https://www.workbuddy.ai/v3/config")
     return Response.json({ code: 0, data: {
       agents: [{ name: "cli", models: ["default-model", "fast-model", "balanced-model", "primary-model"] }],
       models: [{ id: "default-model", credits: "" }, { id: "fast-model", credits: "x0.34 credits" }, { id: "balanced-model", credits: "x0.59 credits" }, { id: "primary-model", credits: "x0.99 credits" }],
     } })
-  }
+  })
   try {
     const h = await WorkBuddyAIAuthPlugin({ client: { auth: { set: async () => { throw Error("fixture does not write auth") } } } })
-    const config = {}
+    const config: { provider?: Record<string, WireRecord> } = {}
     await h.config(config)
-    const models = await h.provider.models(config.provider["workbuddy-ai"], { auth: { type: "oauth", access: "offline-access", expires: Date.now() + 86400000 } })
+    const models = await h.provider.models(config.provider["workbuddy-ai"] as import("./types.ts").ProviderInfo, { auth: { type: "oauth", access: "offline-access", expires: Date.now() + 86400000 } })
     expect(models["fast-model"].rate).toBe(0.34)
     expect(models["balanced-model"].rate).toBe(0.59)
     expect(models["primary-model"].rate).toBe(0.99)
     expect(models["default-model"].free).toBe(false)
-  } finally { globalThis.fetch = real }
+  } finally { setFetch(real) }
 })

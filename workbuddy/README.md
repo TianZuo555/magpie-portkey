@@ -204,7 +204,7 @@ not, without a matching vendor usage record, prove how many credits that
 request deducted. A usage-read error means the balance is unknown.
 
 The encrypted-desktop result can be reproduced without an account using
-`packages/workbuddy/usage.test.mjs` in an isolated temporary HOME (and
+`workbuddy/usage.test.ts` in an isolated temporary HOME (and
 USERPROFILE on Windows). It covers sign-in, usage and chat against a
 synthetic sealed desktop file, and checks that the file stays unchanged.
 A successful browser authorization alone is not a migration: compare the

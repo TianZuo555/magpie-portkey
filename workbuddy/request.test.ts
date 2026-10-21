@@ -1,7 +1,9 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // WorkBuddy's international chat endpoint uses a narrower OpenAI-compatible
 // request shape than pi-ai's default Chat Completions payload.
 import { expect, test } from "bun:test"
-import { WorkBuddyAIAuthPlugin, _internal } from "./index.mjs"
+import { WorkBuddyAIAuthPlugin, _internal } from "./index.ts"
 
 const { withSystem, normalizeToolChoice, fitted } = _internal
 
@@ -19,7 +21,7 @@ test("normalizes pi-ai output limits and developer messages", () => {
     ],
   })
 
-  const out = JSON.parse(withSystem(body))
+  const out = parse(withSystem(body))
   expect(out.max_tokens).toBe(128000)
   expect(out.max_completion_tokens).toBeUndefined()
   expect(out.messages[0]).toEqual({ role: "system", content: "You are a coding assistant." })
@@ -36,7 +38,7 @@ test("flattens tool_choice after tool names are made safe", () => {
     tool_choice: { type: "function", function: { name: "fs.read" } },
   })
   const fit = fitted(body)
-  const out = JSON.parse(normalizeToolChoice(fit.body))
+  const out = parse(normalizeToolChoice(fit.body))
 
   expect(out.tools[0].function.name).toBe("fs_read")
   expect(out.tool_choice).toBe("fs_read")
@@ -48,7 +50,7 @@ test("removes tools when tool_choice is none", () => {
     tools: [{ type: "function", function: { name: "read", parameters: { type: "object" } } }],
     tool_choice: { type: "none" },
   })
-  const out = JSON.parse(normalizeToolChoice(body))
+  const out = parse(normalizeToolChoice(body))
 
   expect(out.tool_choice).toBeUndefined()
   expect(out.tools).toBeUndefined()
@@ -57,10 +59,10 @@ test("removes tools when tool_choice is none", () => {
 test("loader sends the normalized body to WorkBuddy", async () => {
   const realFetch = globalThis.fetch
   let sent
-  globalThis.fetch = async (_url, init) => {
-    sent = JSON.parse(init.body)
+  setFetch(async (_url, init) => {
+    sent = parse(init.body)
     return new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
-  }
+  })
   try {
     const hooks = await WorkBuddyAIAuthPlugin({ client: {} })
     const loader = await hooks.auth.loader(async () => ({
@@ -69,7 +71,7 @@ test("loader sends the normalized body to WorkBuddy", async () => {
       uid: "uid",
       expires: Date.now() + 3600_000,
     }))
-    const response = await loader.fetch("https://www.workbuddy.ai/v2/chat/completions", {
+    const response = await chatFetch(loader)("https://www.workbuddy.ai/v2/chat/completions", {
       method: "POST",
       body: JSON.stringify({
         model: "gpt-6.1-sol",
@@ -91,6 +93,6 @@ test("loader sends the normalized body to WorkBuddy", async () => {
     expect(sent.tools[0].function.name).toBe("fs_read")
     expect(sent.tool_choice).toBe("fs_read")
   } finally {
-    globalThis.fetch = realFetch
+    setFetch(realFetch)
   }
 })

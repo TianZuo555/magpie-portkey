@@ -1,9 +1,11 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // WorkBuddy AI answers 400 "Invalid request parameters" (11133) to a chat
 // whose tools its model turns away: wyh's ZCode and DeepSeek Harness on
 // deepseek-v4.1-flash. Each shape below was refused on the owner's account
 // (2026-10-08) and passed once mended as here.
 import { expect, test } from "bun:test"
-import { _internal } from "./index.mjs"
+import { _internal } from "./index.ts"
 
 const { fitted, fitTools, renamed } = _internal
 
@@ -16,7 +18,7 @@ test("a pattern's \\0 is sent as \\u0000, at any depth; \\\\0 and \\01 are left"
     b: { type: "array", items: { type: "string", pattern: "x\\0" } },
     c: { type: "string", pattern: "\\\\0|\\01" },
   } })])
-  const b = JSON.parse(fitted(body).body)
+  const b = parse(fitted(body).body)
   const ps = b.tools[0].function.parameters
   expect(ps.properties.a.pattern).toBe("^[^\\u0000]*$")
   expect(ps.properties.b.items.pattern).toBe("x\\u0000")
@@ -30,7 +32,7 @@ test("a root anyOf of objects becomes one object; a field each branch requires s
     { type: "object", properties: { kind: { const: "a" }, x: { type: "string" } }, required: ["kind", "x"] },
     { type: "object", properties: { kind: { const: "b" }, y: { type: "number" } }, required: ["kind"] },
   ] })])
-  const ps = JSON.parse(fitted(body).body).tools[0].function.parameters
+  const ps = parse(fitted(body).body).tools[0].function.parameters
   expect(ps.anyOf).toBeUndefined()
   expect(ps.type).toBe("object")
   expect(Object.keys(ps.properties).sort()).toEqual(["kind", "x", "y"])
@@ -40,7 +42,7 @@ test("a root anyOf of objects becomes one object; a field each branch requires s
 
 test("root allOf and $ref branches are merged", () => {
   const body = chat([tool("t", { $defs: { A: { type: "object", properties: { a: { type: "string" } }, required: ["a"] } }, allOf: [{ $ref: "#/$defs/A" }, { type: "object", properties: { b: { type: "string" } } }] })])
-  const ps = JSON.parse(fitted(body).body).tools[0].function.parameters
+  const ps = parse(fitted(body).body).tools[0].function.parameters
   expect(ps.allOf).toBeUndefined()
   expect(Object.keys(ps.properties).sort()).toEqual(["a", "b"])
   expect(ps.required).toEqual(["a"])
@@ -48,7 +50,7 @@ test("root allOf and $ref branches are merged", () => {
 
 test("parameters with no type, or empty, are an object", () => {
   const body = chat([tool("a", { properties: { x: { type: "string" } } }), tool("b", {}), tool("c", null)])
-  const tools = JSON.parse(fitted(body).body).tools
+  const tools = parse(fitted(body).body).tools
   expect(tools[0].function.parameters).toEqual({ type: "object", properties: { x: { type: "string" } } })
   expect(tools[1].function.parameters).toEqual({ type: "object", properties: {} })
   expect(tools[2].function.parameters).toEqual({ type: "object", properties: {} })
@@ -56,7 +58,7 @@ test("parameters with no type, or empty, are an object", () => {
 
 test("a tuple's items become one schema", () => {
   const body = chat([tool("t", { type: "object", properties: { p: { type: "array", items: [{ type: "number" }, { type: "string" }], additionalItems: false }, q: { type: "array", items: [{ type: "number" }] } } })])
-  const ps = JSON.parse(fitted(body).body).tools[0].function.parameters
+  const ps = parse(fitted(body).body).tools[0].function.parameters
   expect(ps.properties.p).toEqual({ type: "array", items: { anyOf: [{ type: "number" }, { type: "string" }] } })
   expect(ps.properties.q.items).toEqual({ type: "number" })
 })
@@ -122,7 +124,7 @@ test("the model's calls come back under the client's names, streamed or not", as
 // tools. Each shape below was refused on the owner's account (2026-10-14)
 // and passed once mended as here, on Kimi, DeepSeek (11129 before) and
 // GLM; MiniMax and Hunyuan took both.
-const params = (ps) => JSON.parse(fitted(chat([tool("t", ps)])).body).tools[0].function.parameters
+const params = (ps) => parse(fitted(chat([tool("t", ps)])).body).tools[0].function.parameters
 const prop = (p) => params({ type: "object", properties: { a: p } }).properties.a
 
 test("an enum with no type takes its values' type, or that and null", () => {

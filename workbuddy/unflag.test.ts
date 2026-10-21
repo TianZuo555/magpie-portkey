@@ -1,8 +1,10 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // WorkBuddy refuses a chat holding words of Codex's or Claude Code's own
 // prompts (magpie #182); withSystem puts words that pass in their place,
 // in every message, as tried against both builds.
 import { expect, test } from "bun:test"
-import { _internal } from "./index.mjs"
+import { _internal } from "./index.ts"
 
 const { withSystem, unflagged } = _internal
 
@@ -30,7 +32,7 @@ test("Claude Code's request through magpie passes: header block gone, the rest r
       { role: "user", content: [{ type: "text", text: "gitStatus\nMain branch (you will usually use this for PRs): main" }, { type: "image_url", image_url: { url: "data:," } }] },
     ],
   })
-  const b = JSON.parse(withSystem(body))
+  const b = parse(withSystem(body))
   expect(b.messages[0]).toEqual({ role: "system", content: [{ type: "text", text: "You are Claude Code, Anthropic's CLI for Claude." }] })
   expect(b.messages[1].content[0].text).toBe("gitStatus\nMain branch (usually the base for PRs): main")
   expect(b.messages[1].content[1]).toEqual({ type: "image_url", image_url: { url: "data:," } })
@@ -41,7 +43,7 @@ test("a system message of the header alone goes, and WorkBuddy's default takes i
     { role: "system", content: "x-anthropic-billing-header: cc_version=2.1.280; cc_entrypoint=cli;" },
     { role: "user", content: "hi" },
   ] })
-  expect(JSON.parse(withSystem(body)).messages).toEqual([
+  expect(parse(withSystem(body)).messages).toEqual([
     { role: "system", content: "You are a helpful assistant." },
     { role: "user", content: "hi" },
   ])

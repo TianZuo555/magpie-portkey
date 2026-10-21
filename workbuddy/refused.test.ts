@@ -1,8 +1,10 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // WorkBuddy's refusal of words in a client's prompt carries the hint
 // magpie's Routing page knows (WB_REFUSED), at the end of the message,
 // where the page looks for it.
 import { expect, test } from "bun:test"
-import { _internal } from "./index.mjs"
+import { _internal } from "./index.ts"
 
 const { explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT } = _internal
 
@@ -113,8 +115,8 @@ test("a chat body in bytes is read, and given the system message", () => {
   const chat = { model: "m", messages: [{ role: "user", content: "hi" }] }
   const want = { model: "m", messages: [{ role: "system", content: "You are a helpful assistant." }, { role: "user", content: "hi" }] }
   for (const b of [Buffer.from(JSON.stringify(chat)), new TextEncoder().encode(JSON.stringify(chat)), new TextEncoder().encode(JSON.stringify(chat)).buffer])
-    expect(JSON.parse(withSystem(b))).toEqual(want)
-  expect(JSON.parse(withSystem(JSON.stringify(chat)))).toEqual(want)
+    expect(parse(withSystem(b))).toEqual(want)
+  expect(parse(withSystem(JSON.stringify(chat)))).toEqual(want)
 })
 
 // magpie #1849: the body WorkBuddy AI answered for an account it restricted,

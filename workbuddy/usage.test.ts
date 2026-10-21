@@ -1,3 +1,5 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // auth.usage tells what magpie's built-in WorkBuddy usage told for the same
 // answers (internal/provider/workbuddy_test.go, workbuddy_ai_test.go).
 import { test, expect, afterAll, beforeAll, afterEach } from "bun:test"
@@ -12,7 +14,7 @@ beforeAll(async () => {
   // no real sign-in is ever read
   if (![tmpdir(), realpathSync(tmpdir())].some((t) => homedir().startsWith(t))) throw new Error("run with HOME=$(mktemp -d) bun test")
   home = homedir()
-  ;({ WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } = await import("./index.mjs"))
+  ;({ WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } = await import("./index.ts"))
 })
 // nothing leaves the machine; the fetch this file found is put back when
 // it is done, so the next test file (bun runs them all in one process)
@@ -20,10 +22,10 @@ beforeAll(async () => {
 // fetch, sent its stand-in's requests nowhere and its sign-in polled on
 const offline = async () => { throw new Error("no network in tests") }
 const real = globalThis.fetch
-globalThis.fetch = offline
-afterAll(() => (globalThis.fetch = real))
+setFetch(offline)
+afterAll(() => (setFetch(real)))
 afterEach(() => {
-  globalThis.fetch = offline
+  setFetch(offline)
   _internal.desktopHeld.clear()
 })
 
@@ -37,12 +39,12 @@ const PAID = { IsPaidUser: true, Packages: [
 
 function serve(routes) {
   const calls = []
-  globalThis.fetch = async (url, init) => {
+  setFetch(async (url, init) => {
     const u = new URL(String(url))
     calls.push({ url: u, init, headers: new Headers(init?.headers) })
     const r = routes[u.pathname]
     return r ? r(init) : new Response("", { status: 404 })
-  }
+  })
   return calls
 }
 const usageOf = async (plugin, auth, client = {}) => (await plugin({ client })).auth.usage(async () => auth)
@@ -93,7 +95,7 @@ test("WorkBuddy's refusals are the card's error", async () => {
 // the card must never get an empty error
 test("any refused status is an error with words", async () => {
   const auth = { type: "oauth", access: "a", expires: later(), uid: "u" }
-  for (const [status, said] of [[409, "Conflict"], [402, "Payment Required"], [422, "Unprocessable Entity"], [501, "Not Implemented"], [520, "HTTP 520"], [302, "Found"]]) {
+  for (const [status, said] of [[409, "Conflict"], [402, "Payment Required"], [422, "Unprocessable Entity"], [501, "Not Implemented"], [520, "HTTP 520"], [302, "Found"]] as const) {
     serve({ "/billing/meter/get-user-resource-summary": () => new Response("", { status }) })
     expect([status, await usageOf(WorkBuddyAuthPlugin, auth)]).toEqual([status, { error: said, signIn: "kept" }])
   }
@@ -167,7 +169,7 @@ test("a desktop sign-in the app keeps encrypted says so, and that the browser si
   const auth = { type: "oauth", access: "", refresh: "", expires: 0, source: "desktop", uid: "u9" }
   expect((await usageOf(WorkBuddyAIAuthPlugin, auth, { auth: { set: async () => {} } })).error).toBe(want)
   const opts = await p.auth.loader(async () => auth)
-  await expect(opts.fetch(opts.baseURL + "/chat/completions", { method: "POST", body: "{}" })).rejects.toThrow(want)
+  await expect(chatFetch(opts)(opts.baseURL + "/chat/completions", { method: "POST", body: "{}" })).rejects.toThrow(want)
   expect(readFileSync(file, "utf8")).toBe(info)
   rmSync(file)
 })
@@ -194,7 +196,7 @@ test("each model's rate is its credits", async () => {
     const auth = { type: "oauth", access: "a", refresh: "r", expires: later(), uid: "u", domain: "" }
     const ms = await hooks.provider.models({ id: hooks.auth.provider, models: {} }, { auth })
     expect(calls.map((c) => c.url.pathname)).toEqual(["/v3/config"])
-    expect(Object.fromEntries(Object.entries(ms).map(([k, m]) => [k, [m.rate, m.free]]))).toEqual({
+    expect(Object.fromEntries(Object.entries(ms).map(([k, m]: [string, WireRecord]) => [k, [m.rate, m.free]]))).toEqual({
       "deepseek-v4.1-flash": [0, true],
       "deepseek-v4.1-flash-sg": [0.03, false],
       "gpt-5.5": [1, false],
@@ -226,7 +228,7 @@ test("WorkBuddy AI's GLM models are text-only, its others and China's GLM keep i
     serve({ "/v3/config": cfg })
     const hooks = await plugin({ client: {} })
     const ms = await hooks.provider.models({ id: hooks.auth.provider, models: {} }, { auth })
-    return Object.fromEntries(Object.entries(ms).map(([k, m]) => [k, [m.capabilities.input.image, m.capabilities.attachment]]))
+    return Object.fromEntries(Object.entries(ms).map(([k, m]: [string, WireRecord]) => [k, [m.capabilities.input.image, m.capabilities.attachment]]))
   }
   expect(await images(WorkBuddyAIAuthPlugin)).toEqual({
     "glm-5.3-flash": [false, false], "glm-5.3": [false, false], "glm-5.2": [false, false], "glm-6": [false, false],
@@ -267,11 +269,11 @@ test("the credits that run out soonest, for routing to spend first (cdredfox on 
   // the same lists ten years on, so the test still reads them as to come
   const YEARS = 10, later10 = (d) => ({ ...d, Accounts: d.Accounts.map((p) => ({ ...p, DeductionEndTime: p.DeductionEndTime + Date.UTC(2036, 9, 1) - Date.UTC(2026, 9, 1),
     CycleEndTime: String(Number(p.CycleEndTime.slice(0, 4)) + YEARS) + p.CycleEndTime.slice(4) })) })
-  const bodies = {}
+  const bodies: WireRecord = {}
   serve({
     "/billing/meter/get-user-resource-summary": () => ok(AI_SUMMARY),
-    "/billing/meter/get-user-resource-paid-packages": (init) => ((bodies.paid = JSON.parse(init.body)), ok(later10(AI_PAID))),
-    "/billing/meter/get-user-resource-free-packages": (init) => ((bodies.free = JSON.parse(init.body)), ok(later10(AI_FREE))),
+    "/billing/meter/get-user-resource-paid-packages": (init) => ((bodies.paid = parse(init.body)), ok(later10(AI_PAID))),
+    "/billing/meter/get-user-resource-free-packages": (init) => ((bodies.free = parse(init.body)), ok(later10(AI_FREE))),
   })
   const auth = { type: "oauth", access: "a", refresh: "r", expires: later(), uid: "u" }
   const u = await usageOf(WorkBuddyAIAuthPlugin, auth)

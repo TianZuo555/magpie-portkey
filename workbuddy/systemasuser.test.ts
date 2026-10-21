@@ -1,3 +1,5 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // WorkBuddy refuses a chat whose system (or an assistant) message holds a
 // line it knows from another agent, as 400 11128 "Illegal API invocation
 // from an unapproved channel"; the user's and tools' messages aren't read.
@@ -6,7 +8,7 @@
 // www.workbuddy.ai both sent on 2026-10-21 for a system prompt opening with
 // Claude Code's identity line.
 import { expect, test } from "bun:test"
-import { WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } from "./index.mjs"
+import { WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } from "./index.ts"
 
 const { systemAsUser, REFUSED_HINT, DEFAULT_SYSTEM } = _internal
 
@@ -32,24 +34,24 @@ const ANYWHERE = "Example fingerprint (you will usually see this)"
 const text = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.map((p) => p?.text ?? "").join("") : "")
 const refuses = (m) => (m.role === "system" || m.role === "assistant") && (text(m.content).toLowerCase().startsWith(OPENING.toLowerCase()) || text(m.content).includes(ANYWHERE))
 
-async function withService(Plugin, fn, answer) {
+async function withService(Plugin, fn, answer?) {
   const realFetch = globalThis.fetch
   const sent = []
-  globalThis.fetch = async (_url, init) => {
-    const b = JSON.parse(init.body)
+  setFetch(async (_url, init) => {
+    const b = parse(init.body)
     sent.push(b)
     const said = answer?.(b)
     if (said) return said
     if (b.messages.some(refuses)) return new Response(REFUSAL, { status: 400, headers: { "content-type": "application/json; charset=utf-8" } })
     return new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
-  }
+  })
   try {
     const hooks = await Plugin({ client: {} })
     const loader = await hooks.auth.loader(async () => ({ type: "oauth", access: "access", uid: "uid", expires: Date.now() + 3600_000 }))
-    const post = (body) => loader.fetch("https://copilot.tencent.com/v2/chat/completions", { method: "POST", body: JSON.stringify({ model: "glm-5.3", stream: true, ...body }) })
+    const post = (body) => chatFetch(loader)("https://copilot.tencent.com/v2/chat/completions", { method: "POST", body: JSON.stringify({ model: "glm-5.3", stream: true, ...body }) })
     await fn(post, sent)
   } finally {
-    globalThis.fetch = realFetch
+    setFetch(realFetch)
   }
 }
 
@@ -138,7 +140,7 @@ test("11128 for another reason moves nothing", async () => {
 })
 
 test("systemAsUser: parts, a later system message, no user message", () => {
-  const parts = JSON.parse(
+  const parts = parse(
     systemAsUser(
       JSON.stringify({
         messages: [
@@ -156,7 +158,7 @@ test("systemAsUser: parts, a later system message, no user message", () => {
   expect(parts.messages[1].content.slice(1).map((p) => p.type)).toEqual(["text", "image_url"])
   expect(parts.messages[3]).toEqual({ role: "user", content: "Reminder: be brief." })
 
-  const alone = JSON.parse(systemAsUser(JSON.stringify({ messages: [{ role: "system", content: OPENING }] })))
+  const alone = parse(systemAsUser(JSON.stringify({ messages: [{ role: "system", content: OPENING }] })))
   expect(alone.messages).toEqual([{ role: "system", content: DEFAULT_SYSTEM }, { role: "user", content: "<instructions>\n" + OPENING + "\n</instructions>" }])
 
   expect(systemAsUser(JSON.stringify({ messages: [{ role: "system", content: DEFAULT_SYSTEM }, ask] }))).toBeNull()

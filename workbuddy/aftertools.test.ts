@@ -1,8 +1,10 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // WorkBuddy AI's gemini-3.8-flash answers tool results followed by the
 // user's message with 400 code 11153, "the conversation must end with a user
 // message" (#113). The body is the one www.workbuddy.ai sent on 2026-10-14.
 import { expect, test } from "bun:test"
-import { WorkBuddyAIAuthPlugin, _internal } from "./index.mjs"
+import { WorkBuddyAIAuthPlugin, _internal } from "./index.ts"
 
 const { replyAfterTools } = _internal
 
@@ -24,8 +26,8 @@ const reminder = { role: "user", content: [{ type: "text", text: "<system-remind
 async function withService(fn) {
   const realFetch = globalThis.fetch
   const sent = []
-  globalThis.fetch = async (_url, init) => {
-    const b = JSON.parse(init.body)
+  setFetch(async (_url, init) => {
+    const b = parse(init.body)
     sent.push(b)
     const m = b.messages
     let i = m.length - 1
@@ -34,15 +36,15 @@ async function withService(fn) {
       return new Response(REFUSAL, { status: 400, headers: { "content-type": "application/json" } })
     }
     return new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
-  }
+  })
   try {
     const hooks = await WorkBuddyAIAuthPlugin({ client: {} })
     const loader = await hooks.auth.loader(async () => ({ type: "oauth", access: "access", uid: "uid", expires: Date.now() + 3600_000 }))
     const post = (model, messages) =>
-      loader.fetch("https://www.workbuddy.ai/v2/chat/completions", { method: "POST", body: JSON.stringify({ model, stream: true, messages }) })
+      chatFetch(loader)("https://www.workbuddy.ai/v2/chat/completions", { method: "POST", body: JSON.stringify({ model, stream: true, messages }) })
     await fn(post, sent)
   } finally {
-    globalThis.fetch = realFetch
+    setFetch(realFetch)
   }
 }
 
@@ -86,7 +88,7 @@ test("a chat ending with the assistant's message is a prefill, refused as it was
 
 test("replyAfterTools changes only tool results followed by user messages", () => {
   const body = (messages) => JSON.stringify({ model: "m", messages })
-  expect(JSON.parse(replyAfterTools(body([ask, call, result, ask, reminder]))).messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant", "user", "user"])
+  expect(parse(replyAfterTools(body([ask, call, result, ask, reminder]))).messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant", "user", "user"])
   expect(replyAfterTools(body([ask]))).toBeNull()
   expect(replyAfterTools(body([ask, call, result]))).toBeNull()
   expect(replyAfterTools(body([ask, call, result, { role: "assistant", content: "ok" }, ask]))).toBeNull()

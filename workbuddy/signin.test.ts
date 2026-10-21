@@ -1,20 +1,22 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // What a failure means for the sign-in, as magpie's built-in WorkBuddy
 // account had it: WorkBuddy's own 401 was passed on and no WorkBuddy
 // account was ever marked lapsed, so every refusal says X-Magpie-Sign-In:
 // kept; a token that couldn't be renewed fails in wbFresh's words.
 import { afterEach, expect, test } from "bun:test"
-import { WorkBuddyAIAuthPlugin, _internal } from "./index.mjs"
+import { WorkBuddyAIAuthPlugin, _internal } from "./index.ts"
 
 const real = globalThis.fetch
-afterEach(() => (globalThis.fetch = real))
+afterEach(() => (setFetch(real)))
 
 const later = () => Date.now() + 3600_000
 const ask = async (reply) => {
-  globalThis.fetch = async () => reply()
+  setFetch(async () => reply())
   const auth = { type: "oauth", access: "a", refresh: "r", expires: later(), uid: "u" }
   const hooks = await WorkBuddyAIAuthPlugin({ client: {} })
   const opts = await hooks.auth.loader(async () => auth)
-  return opts.fetch("https://www.workbuddy.ai/v2/chat/completions", { method: "POST", body: '{"messages":[]}' })
+  return chatFetch(opts)("https://www.workbuddy.ai/v2/chat/completions", { method: "POST", body: '{"messages":[]}' })
 }
 
 test("WorkBuddy's 401 goes on as it came, the account kept", async () => {
@@ -40,7 +42,7 @@ test("a reply that went through keeps the sign-in too", async () => {
 
 // wbFresh with no access token left: its words, on either site
 const refresh = async (reply, a = {}) => {
-  globalThis.fetch = async () => reply()
+  setFetch(async () => reply())
   const site = _internal.SITES["workbuddy-ai"]
   try {
     await _internal.fresh(site, null, { access: "", refresh: "r", expires: 1, ...a })

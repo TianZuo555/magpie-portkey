@@ -1,12 +1,14 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // An enterprise (team) account is asked for as the enterprise, as
 // WorkBuddy's own client asks: X-Enterprise-Id and X-Tenant-Id carry the
 // account's enterpriseId on every request, or WorkBuddy answers as the
 // personal account and lists the personal plan's models (#75).
 import { afterEach, expect, test } from "bun:test"
-import { WorkBuddyAuthPlugin, _internal } from "./index.mjs"
+import { WorkBuddyAuthPlugin, _internal } from "./index.ts"
 
 const real = globalThis.fetch
-afterEach(() => (globalThis.fetch = real))
+afterEach(() => (setFetch(real)))
 
 const site = _internal.SITES.workbuddy
 const later = () => Date.now() + 3600_000
@@ -19,7 +21,7 @@ const seen = (into) => async (url, init) => {
 
 test("an enterprise account's model list is asked for as the enterprise (#75)", async () => {
   const got = []
-  globalThis.fetch = seen(got)
+  setFetch(seen(got))
   await _internal.liveModels(site, { access: "a", uid: "u", enterpriseId: "ent-1" })
   expect(got[0].url).toEndWith("/v3/config")
   expect(got[0].headers.get("X-Enterprise-Id")).toBe("ent-1")
@@ -28,7 +30,7 @@ test("an enterprise account's model list is asked for as the enterprise (#75)", 
 
 test("a personal account's list carries no enterprise", async () => {
   const got = []
-  globalThis.fetch = seen(got)
+  setFetch(seen(got))
   await _internal.liveModels(site, { access: "a", uid: "u" })
   expect(got[0].headers.has("X-Enterprise-Id")).toBe(false)
   expect(got[0].headers.has("X-Tenant-Id")).toBe(false)
@@ -36,11 +38,11 @@ test("a personal account's list carries no enterprise", async () => {
 
 test("an enterprise account's chats carry the enterprise too", async () => {
   const got = []
-  globalThis.fetch = seen(got)
+  setFetch(seen(got))
   const auth = { type: "oauth", access: "a", refresh: "r", expires: later(), uid: "u", enterpriseId: "ent-1" }
   const hooks = await WorkBuddyAuthPlugin({ client: {} })
   const opts = await hooks.auth.loader(async () => auth)
-  await opts.fetch("https://copilot.tencent.com/v2/chat/completions", { method: "POST", body: '{"messages":[]}' })
+  await chatFetch(opts)("https://copilot.tencent.com/v2/chat/completions", { method: "POST", body: '{"messages":[]}' })
   expect(got.at(-1).headers.get("X-Enterprise-Id")).toBe("ent-1")
   expect(got.at(-1).headers.get("X-Tenant-Id")).toBe("ent-1")
 })
@@ -48,7 +50,7 @@ test("an enterprise account's chats carry the enterprise too", async () => {
 // the sign-in, with WorkBuddy's answers as its own client reads them
 const signIn = async (account, accounts) => {
   const asked = []
-  globalThis.fetch = async (url, init) => {
+  setFetch(async (url, init) => {
     const u = new URL(String(url))
     asked.push(u.pathname)
     const data =
@@ -58,7 +60,7 @@ const signIn = async (account, accounts) => {
       : u.pathname.endsWith("/accounts") ? { accounts }
       : {}
     return new Response(JSON.stringify({ code: 0, data }))
-  }
+  })
   const flow = await _internal.browserSignIn(site)
   return { result: await flow.callback(), asked }
 }

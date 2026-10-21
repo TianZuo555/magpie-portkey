@@ -13,6 +13,8 @@ import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
+import type { Account, Authorization, Client, LiveModel, MagpiePlugin, ModelSeed, ProviderInfo, UsageWindow, WireRecord, Site } from "./types.ts"
+
 const APP_VERSION = "2.0.0" // the version WorkBuddy's sign-in page is opened with
 const UA_VERSION = "5.5.6" // WorkBuddy/<this> is the User-Agent the API takes
 const POLL_MS = 1000
@@ -22,7 +24,7 @@ const LEAD_MS = 5 * 60 * 1000 // and this close, magpie renews it ahead of time 
 const KEEP_RENEWED_MS = 60 * 1000 // how long a refresh's result answers for the old refresh token
 
 // [id, name, context, efforts]
-const CN_MODELS = [
+const CN_MODELS: ModelSeed[] = [
   ["auto", "Auto", 168000],
   ["hy4-preview-f", "Hy4 preview", 1000000, ["high"]],
   ["hy3", "Hy3", 192000, ["low", "high"]],
@@ -40,7 +42,7 @@ const CN_MODELS = [
   ["deepseek-v4-pro", "Deepseek-V4-Pro", 1000000, ["none", "high", "xhigh"]],
 ]
 
-const AI_MODELS = [
+const AI_MODELS: ModelSeed[] = [
   ["default-model", "Default", 176000],
   ["fast-model", "Fast", 200000],
   ["balanced-model", "Balanced", 256000],
@@ -59,7 +61,7 @@ const AI_MODELS = [
   ["minimax-m3", "MiniMax-M3", 512000],
 ]
 
-const SITES = {
+const SITES: Record<"workbuddy" | "workbuddy-ai", Site> = {
   workbuddy: {
     id: "workbuddy",
     name: "WorkBuddy",
@@ -94,19 +96,27 @@ const SITES = {
 // AI's GLM models alone. Said text-only, magpie's image-describing model
 // reads the image for them; a user who said the model takes images keeps
 // their own answer (magpie's settings, over what this list says).
-function textOnly(site, model) {
+function textOnly(site: Site, model: string) {
   return !!site.noImages?.test(model)
 }
 
 const NPM = "@ai-sdk/openai-compatible"
 const hex = () => randomBytes(16).toString("hex")
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const api = (site) => site.endpoint + "/v2"
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+const api = (site: Site) => site.endpoint + "/v2"
+
+// Errors may come from fetch, the vendor, or the host's SDK.
+function errorDetails(error: unknown): { name?: string; message?: string; said?: string; bare?: boolean } {
+  return error !== null && typeof error === "object" ? error : {}
+}
 
 // ---- WorkBuddy's API ------------------------------------------------------
 
 class WBError extends Error {
-  constructor(message, code, status, said) {
+  code: number
+  status: number
+  said: string
+  constructor(message: string, code: number, status: number, said: string) {
     super(message)
     this.code = code
     this.status = status
@@ -116,7 +126,7 @@ class WBError extends Error {
 
 // call makes a request of WorkBuddy's plugin API, which answers
 // {code, msg, data}; a code but 0 is an error.
-async function call(site, method, path, headers = {}, body) {
+async function call(site: Site, method: string, path: string, headers: Record<string, string> = {}, body?: unknown): Promise<WireRecord> {
   const res = await fetch(site.endpoint + path, {
     method,
     headers: {
@@ -129,7 +139,7 @@ async function call(site, method, path, headers = {}, body) {
     signal: AbortSignal.timeout(30000),
   })
   const text = await res.text()
-  let env = {}
+  let env: WireRecord = {}
   try {
     env = JSON.parse(text)
   } catch {}
@@ -143,13 +153,13 @@ async function call(site, method, path, headers = {}, body) {
   return env.data
 }
 
-function domainOf(site, a) {
+function domainOf(site: Site, a: Account) {
   return a.domain || new URL(api(site)).host
 }
 
 // merge takes a token WorkBuddy gave (sign-in or refresh) into the
 // stored sign-in, times given as at-ms or in-seconds.
-function merge(a, got) {
+function merge(a: Account, got: WireRecord): Account {
   const now = Date.now()
   const out = { ...a, access: got.accessToken }
   if (got.refreshToken) out.refresh = got.refreshToken
@@ -162,7 +172,7 @@ function merge(a, got) {
   return out
 }
 
-function stale(a) {
+function stale(a: Account) {
   return !!a.expires && Date.now() >= a.expires - EARLY_MS
 }
 
@@ -170,16 +180,16 @@ function stale(a) {
 // spends; renewed is what each gave, kept a minute so one that read the
 // old refresh token after it was spent (magpie's auth.refresh, a request)
 // takes that rather than spending it again.
-const renewing = new Map()
-const renewed = new Map()
+const renewing = new Map<string, Promise<Account>>()
+const renewed = new Map<string, { next: Account; at: number }>()
 
-function refreshable(a) {
+function refreshable(a: Account) {
   return !!a.refresh && !(a.refreshExpiresAt && Date.now() >= a.refreshExpiresAt)
 }
 
 // renew spends a's refresh token, once: those who come while it runs, or
 // within KEEP_RENEWED_MS of it, get what it gave. save keeps the result.
-function renew(site, a, save) {
+function renew(site: Site, a: Account, save?: (next: Account) => Promise<void>): Promise<Account> {
   const key = site.id + "\n" + a.refresh
   const done = renewed.get(key)
   if (done && Date.now() - done.at < KEEP_RENEWED_MS) return Promise.resolve(merged(a, done.next))
@@ -187,7 +197,7 @@ function renew(site, a, save) {
   if (!r) {
     r = (async () => {
       const got = await call(site, "POST", "/v2/plugin/auth/token/refresh", {
-        "X-Refresh-Token": a.refresh,
+        "X-Refresh-Token": a.refresh!,
         "X-Auth-Refresh-Source": "plugin",
         "X-Domain": domainOf(site, a),
         ...enterpriseHeaders(a),
@@ -204,18 +214,18 @@ function renew(site, a, save) {
 }
 
 // merged is a with the tokens another's refresh gave over it.
-function merged(a, next) {
+function merged(a: Account, next: Account): Account {
   const out = { ...a }
-  for (const k of TOKEN_FIELDS) if (k in next) out[k] = next[k]
+  for (const k of TOKEN_FIELDS) if (k in next) Object.assign(out, { [k]: next[k] })
   return out
 }
-const TOKEN_FIELDS = ["access", "refresh", "expires", "refreshExpiresAt", "domain", "tokenType"]
+const TOKEN_FIELDS: (keyof Account)[] = ["access", "refresh", "expires", "refreshExpiresAt", "domain", "tokenType"]
 
 // fresh is the sign-in with an access token that isn't about to end:
 // refreshed (and saved) when it is. A refresh that fails, or a refresh
 // token that has ended, leaves the access token there is. Its failures
 // are worded as the built-in's (wbFresh), "WorkBuddy" on both sites.
-async function fresh(site, client, a) {
+async function fresh(site: Site, client: Client | null | undefined, a: Account): Promise<Account> {
   if (!stale(a)) return a
   if (!refreshable(a)) {
     if (a.access) return a
@@ -229,15 +239,15 @@ async function fresh(site, client, a) {
     })
   } catch (e) {
     if (a.access) return a
-    if (e?.bare) throw e
-    throw new Error(`WorkBuddy token refresh: ${e?.said ?? e?.message ?? e}`)
+    if (errorDetails(e).bare) throw e
+    throw new Error(`WorkBuddy token refresh: ${errorDetails(e).said ?? errorDetails(e).message ?? e}`)
   }
 }
 
 // refreshed is what magpie's auth.refresh gives for a browser sign-in:
 // the fields a refresh changed, nothing when there's nothing to renew.
 // magpie saves them itself.
-async function refreshed(site, auth) {
+async function refreshed(site: Site, auth: Account | null | undefined): Promise<Partial<Account> | undefined> {
   if (auth?.type !== "oauth" || auth.source === "desktop" || !auth.access || !auth.refresh) return undefined
   // a refresh token that has ended is said plainly, never as signIn
   // "expired": the built-in never marked a WorkBuddy account
@@ -246,11 +256,11 @@ async function refreshed(site, auth) {
   try {
     next = await renew(site, auth)
   } catch (e) {
-    if (e?.bare) throw e
-    throw new Error(`WorkBuddy token refresh: ${e?.said ?? e?.message ?? e}`)
+    if (errorDetails(e).bare) throw e
+    throw new Error(`WorkBuddy token refresh: ${errorDetails(e).said ?? errorDetails(e).message ?? e}`)
   }
-  const out = {}
-  for (const k of TOKEN_FIELDS) if (k in next && next[k] !== auth[k]) out[k] = next[k]
+  const out: Partial<Account> = {}
+  for (const k of TOKEN_FIELDS) if (k in next && next[k] !== auth[k]) Object.assign(out, { [k]: next[k] })
   return Object.keys(out).length ? out : undefined
 }
 
@@ -266,7 +276,7 @@ async function refreshed(site, auth) {
 // when only some of the group is there. The gate below used to give the China
 // build none of the client's headers, so every China-build request was
 // attribution-less.
-function sign(site, a, headers) {
+function sign(site: Site, a: Account, headers: Headers) {
   headers.set("Authorization", "Bearer " + a.access)
   headers.set("X-User-Id", a.uid ?? "")
   headers.set("X-Domain", domainOf(site, a))
@@ -289,7 +299,7 @@ function sign(site, a, headers) {
 // account's enterpriseId). Without them WorkBuddy answers as the personal
 // account: /v3/config lists the personal plan's models and not the
 // enterprise's (#75). A personal account has none and sends none.
-function enterpriseHeaders(a) {
+function enterpriseHeaders(a: Account | null | undefined): Record<string, string> {
   const id = typeof a?.enterpriseId === "string" ? a.enterpriseId.trim() : ""
   return id ? { "X-Enterprise-Id": id, "X-Tenant-Id": id } : {}
 }
@@ -299,7 +309,7 @@ function enterpriseHeaders(a) {
 // the one WorkBuddy's account list has for it — the same choice WorkBuddy's
 // own client makes (mergeCurrentAccountDetails): the uid's only entry of that
 // type, or the only one it last signed in to. None found is personal.
-async function enterpriseOf(site, a, who) {
+async function enterpriseOf(site: Site, a: Account, who: WireRecord) {
   const own = typeof who?.enterpriseId === "string" ? who.enterpriseId.trim() : ""
   if (own) return own
   const type = String(who?.type ?? "").trim().toLowerCase()
@@ -313,7 +323,7 @@ async function enterpriseOf(site, a, who) {
   } catch {
     return ""
   }
-  const mine = (list?.accounts ?? []).filter((x) => x?.uid === who.uid && typeof x.enterpriseId === "string" && x.enterpriseId.trim())
+  const mine = ((list?.accounts ?? []) as WireRecord[]).filter((x) => x?.uid === who.uid && typeof x.enterpriseId === "string" && x.enterpriseId.trim())
   const same = mine.filter((x) => String(x.type ?? "").trim().toLowerCase() === type)
   const last = mine.filter((x) => x.lastLogin)
   const pick = same.length === 1 ? same[0] : last.length === 1 ? last[0] : mine.length === 1 ? mine[0] : undefined
@@ -342,7 +352,7 @@ const SALT = randomBytes(16).toString("hex")
 
 // idFor is the 32 hex digits WorkBuddy's own ids are made of, made of a
 // name of the thing the id is for (a turn, a conversation) and what names it.
-function idFor(kind, key) {
+function idFor(kind: string, key: string) {
   return createHash("sha256").update(`${SALT}|${kind}|${key}`).digest("hex").slice(0, 32)
 }
 
@@ -351,7 +361,7 @@ function idFor(kind, key) {
 // a turn of its own too. A tool result's part — carried in a user message by
 // clients of Anthropic's shape — is left out: it is not what the user said,
 // and it changes with every step of the send.
-function signatureOf(content) {
+function signatureOf(content: unknown) {
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
   let out = ""
@@ -370,7 +380,7 @@ function signatureOf(content) {
 // words. A client that sends a tool result's images in a user message (pi's
 // "Attached image(s) from tool result:") puts that message right after the
 // result, and a turn keyed on it would be a turn of its own on every step.
-function answeredBefore(msgs, i) {
+function answeredBefore(msgs: WireRecord[], i: number) {
   const prev = msgs[i - 1]
   if (prev === null || typeof prev !== "object") return false
   if (prev.role === "tool") return true
@@ -383,7 +393,7 @@ function answeredBefore(msgs, i) {
 // last such message has nothing signable in it (an empty message) or which
 // has none at all: the caller then makes a fresh id for that request, as
 // before these were derived at all.
-function turnKey(chat) {
+function turnKey(chat: WireRecord | null) {
   const msgs = Array.isArray(chat?.messages) ? chat.messages : []
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i]?.role !== "user" || answeredBefore(msgs, i)) continue
@@ -399,7 +409,7 @@ function turnKey(chat) {
 // one — a body that isn't a chat, or one with no user message in it — and no
 // conversation id is sent then: a made-up one would be a conversation of the
 // request's own, which is what fragments the usage detail in the first place.
-function conversationKey(chat, session) {
+function conversationKey(chat: WireRecord | null, session: string) {
   if (session) return `session:${session}`
   const msgs = Array.isArray(chat?.messages) ? chat.messages : []
   for (const m of msgs) {
@@ -412,7 +422,7 @@ function conversationKey(chat, session) {
 
 // chatOf is a chat's body as the object it is, null for one that isn't: a
 // body that isn't text (bytes), or isn't JSON at all.
-function chatOf(body) {
+function chatOf(body: unknown): WireRecord | null {
   if (typeof body !== "string") return null
   try {
     const b = JSON.parse(body)
@@ -425,7 +435,7 @@ function chatOf(body) {
 // sessionOf takes the session a chat.headers hook named off the headers,
 // with the header: it goes no further than here. Its length is capped as
 // magpie's own session ids are, the id below being derived from it anyway.
-function sessionOf(headers) {
+function sessionOf(headers: Headers) {
   const s = String(headers.get(SESSION) ?? "").trim()
   headers.delete(SESSION)
   return s.slice(0, 128)
@@ -436,7 +446,7 @@ function sessionOf(headers) {
 // turn's (one user send, whatever it takes), and the conversation's. A header
 // already there — the caller's own, or another plugin's — is kept, and the
 // message and request ids are the same one, as WorkBuddy's client has them.
-function attend(headers, body, session) {
+function attend(headers: Headers, body: unknown, session: string) {
   const chat = chatOf(body)
   const conv = conversationKey(chat, session)
   const msg = hex()
@@ -458,7 +468,7 @@ function attend(headers, body, session) {
 // every message, not only the system prompt (Claude Code puts its main
 // branch in the first user message), and pays no mind to case. Claude
 // Code's billing header means nothing to WorkBuddy's models and goes.
-const FLAGGED = [
+const FLAGGED: [RegExp, string][] = [
   [/x-anthropic-billing-header:[^\n]*\n?/gi, ""],
   [/You are Claude Code, Anthropic['’]s official CLI for Claude/gi, "You are Claude Code, Anthropic's CLI for Claude"],
   [/Main branch \(you will usually use this for PRs\)/gi, "Main branch (usually the base for PRs)"],
@@ -469,7 +479,7 @@ const FLAGGED = [
   [/You are an AI agent powered by DeepSeek Harness\.?/gi, "You are an AI agent that helps the user with programming tasks."],
 ]
 
-function unflagged(text) {
+function unflagged(text: string) {
   for (const [re, to] of FLAGGED) text = text.replace(re, to)
   return text
 }
@@ -477,7 +487,7 @@ function unflagged(text) {
 // unflag puts FLAGGED's words in place in every message of a chat, and
 // leaves out a text that had nothing else (the billing header's system
 // block). It says whether it changed anything.
-function unflag(messages) {
+function unflag(messages: WireRecord[]) {
   let changed = false
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]
@@ -514,7 +524,7 @@ function unflag(messages) {
 // OpenAI-compatible client normally uses max_completion_tokens and may call a
 // reasoning prompt developer; WorkBuddy's endpoint takes max_tokens and
 // system instead.
-function withSystem(body) {
+function withSystem(body: BodyInit | null | undefined): BodyInit | null | undefined {
   // a body magpie or OpenCode hands over as bytes is read as the text it is
   if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) body = new TextDecoder().decode(body)
   if (typeof body !== "string") return body
@@ -559,7 +569,7 @@ function withSystem(body) {
 const DEFAULT_SYSTEM = "You are a helpful assistant."
 const INSTRUCTIONS = ["<instructions>\n", "\n</instructions>"]
 
-function textOf(content) {
+function textOf(content: unknown) {
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
   return content.map((p) => (typeof p?.text === "string" ? p.text : "")).filter(Boolean).join("\n")
@@ -567,14 +577,14 @@ function textOf(content) {
 
 // systemKey is the text of a chat's system messages, which a chat refused
 // once is known by: the same agent's next chat goes with systemAsUser at once
-function systemKey(body) {
+function systemKey(body: unknown) {
   const msgs = chatOf(body)?.messages
   if (!Array.isArray(msgs)) return ""
   const key = msgs.filter((m) => m?.role === "system").map((m) => textOf(m.content)).join("\n")
   return key.trim() === DEFAULT_SYSTEM ? "" : key
 }
 
-function systemAsUser(body) {
+function systemAsUser(body: unknown): string | null {
   const b = chatOf(body)
   const msgs = b?.messages
   if (!Array.isArray(msgs)) return null
@@ -593,14 +603,14 @@ function systemAsUser(body) {
     else if (Array.isArray(rest[u].content)) rest[u] = { ...rest[u], content: [{ type: "text", text }, ...rest[u].content] }
     else rest[u] = { ...rest[u], content: text }
   }
-  b.messages = [{ role: "system", content: DEFAULT_SYSTEM }, ...rest]
+  b!.messages = [{ role: "system", content: DEFAULT_SYSTEM }, ...rest]
   return JSON.stringify(b)
 }
 
 // normalizeToolChoice converts the object form emitted by OpenAI clients to
 // WorkBuddy's string form. It runs after fitted(), so a named choice follows a
 // tool name that was made safe for WorkBuddy.
-function normalizeToolChoice(body) {
+function normalizeToolChoice(body: BodyInit | null | undefined): BodyInit | null | undefined {
   if (typeof body !== "string") return body
   try {
     const b = JSON.parse(body)
@@ -654,7 +664,7 @@ const NAME_OK = /^[A-Za-z0-9_-]+$/
 
 // safeName is name with each character WorkBuddy refuses as _, kept apart
 // from the names in taken.
-function safeName(name, taken) {
+function safeName(name: string, taken: Set<string>) {
   const base = String(name).replace(/[^A-Za-z0-9_-]/g, "_") || "tool"
   let n = base
   for (let i = 2; taken.has(n); i++) n = `${base}_${i}`
@@ -671,7 +681,7 @@ const NUL_ESCAPE = /\\\\|\\0(?![0-9])/g
 // the same (magpie's gateway does this for DeepSeek's own API,
 // deepseekToolPatterns); a tuple's items (a list) become one schema any of
 // them fits. It reports whether it changed anything.
-function fitSchema(s, depth = 0) {
+function fitSchema(s: WireRecord | null | undefined, depth = 0): boolean {
   if (!s || typeof s !== "object" || depth > 64) return false
   let changed = false
   if (Array.isArray(s)) {
@@ -717,7 +727,7 @@ const SUB_MAP = ["properties", "patternProperties", "$defs", "definitions", "dep
 const BOOL_OK = new Set(["additionalProperties", "unevaluatedProperties"])
 
 // valueType is the JSON Schema type of an enum's value.
-function valueType(v) {
+function valueType(v: unknown) {
   if (v === null) return "null"
   if (Array.isArray(v)) return "array"
   if (typeof v === "number") return Number.isInteger(v) ? "integer" : "number"
@@ -727,7 +737,7 @@ function valueType(v) {
 // fitEnum gives s's enum a type: the one its values have, or that and
 // "null"; values of several types are an anyOf of an enum for each. It
 // reports whether it changed anything.
-function fitEnum(s) {
+function fitEnum(s: WireRecord): boolean {
   if (!("enum" in s)) return false
   if (!Array.isArray(s.enum) || s.enum.length === 0) {
     delete s.enum
@@ -753,7 +763,7 @@ function fitEnum(s) {
     s.type = want
     return true
   }
-  const split = [...byType].map(([t, vs]) => ({ type: t, enum: vs }))
+  const split: WireRecord[] = [...byType].map(([t, vs]) => ({ type: t, enum: vs }))
   if (hasNull) split.push({ type: "null" })
   delete s.enum
   delete s.type
@@ -764,7 +774,7 @@ function fitEnum(s) {
 
 // subSchema is v, a schema found under key, as an object Kimi takes: true
 // is {}, false is {"not": {}}.
-function subSchema(v, key) {
+function subSchema(v: any, key: string): any {
   if (typeof v !== "boolean" || BOOL_OK.has(key)) return v
   return v ? {} : { not: {} }
 }
@@ -772,7 +782,7 @@ function subSchema(v, key) {
 // fitShape mends s, a schema, and each schema under it, in place (see
 // TYPES above); a name under properties is never read as a keyword. It
 // reports whether it changed anything.
-function fitShape(s, depth = 0) {
+function fitShape(s: WireRecord | null | undefined, depth = 0): boolean {
   if (!s || typeof s !== "object" || Array.isArray(s) || depth > 64) return false
   let changed = false
   if ("type" in s) {
@@ -830,7 +840,7 @@ function fitShape(s, depth = 0) {
 
 // localRef is the schema a local $ref in root names ("#/$defs/x",
 // "#/definitions/x"), or s itself.
-function localRef(root, s) {
+function localRef(root: WireRecord, s: WireRecord): WireRecord {
   const ref = s?.$ref
   if (typeof ref !== "string" || !ref.startsWith("#/")) return s
   let at = root
@@ -843,7 +853,7 @@ function localRef(root, s) {
 // whole; of anyOf's and oneOf's object branches the properties are merged
 // and a field each requires stays required. A root with no type, or an
 // empty one, is an object. It reports whether it changed anything.
-function objectRoot(ps, root = ps, depth = 0) {
+function objectRoot(ps: WireRecord, root = ps, depth = 0): boolean {
   const unions = ["allOf", "anyOf", "oneOf"].filter((k) => Array.isArray(ps[k]))
   if (ps.type === "object" && !unions.length) return false
   const props = ps.properties && typeof ps.properties === "object" ? ps.properties : {}
@@ -865,7 +875,7 @@ function objectRoot(ps, root = ps, depth = 0) {
       branches.push(b)
     }
   }
-  const from = new Map()
+  const from = new Map<string, unknown[]>()
   for (const b of branches) {
     for (const [k, v] of Object.entries(b.properties ?? {})) {
       if (k in props) continue
@@ -894,11 +904,11 @@ function objectRoot(ps, root = ps, depth = 0) {
 // and the names it gave, each to the name the client knows (ours), so that the
 // model's calls are named back. A call in the chat's history is named as
 // its tool now is.
-function fitTools(b) {
+function fitTools(b: WireRecord | null) {
   const names = new Map()
   if (!Array.isArray(b?.tools) || !b.tools.length) return { changed: false, names }
   let changed = false
-  const taken = new Set()
+  const taken = new Set<string>()
   for (const t of b.tools) {
     const n = t?.function?.name
     if (typeof n === "string" && NAME_OK.test(n)) taken.add(n)
@@ -941,7 +951,7 @@ function fitTools(b) {
 // fitted is a chat body with its tools mended (fitTools), and the names
 // given its tools, each to the client's own; a body that isn't a chat is
 // as it was.
-function fitted(body) {
+function fitted(body: BodyInit | null | undefined) {
   if (typeof body !== "string") return { body, names: new Map() }
   try {
     const b = JSON.parse(body)
@@ -954,7 +964,7 @@ function fitted(body) {
 
 // namedBack gives the model's calls in a chat answer (one JSON body, or an
 // SSE stream's chunks) the names the client gave its tools.
-function namedBack(v, names) {
+function namedBack(v: WireRecord, names: Map<string, string>) {
   let changed = false
   for (const c of Array.isArray(v?.choices) ? v.choices : []) {
     for (const at of [c?.message, c?.delta]) {
@@ -971,7 +981,7 @@ function namedBack(v, names) {
 }
 
 // renamed is res with namedBack on its body, read as it comes.
-function renamed(res, names) {
+function renamed(res: Response, names: Map<string, string>): Response | Promise<Response> {
   if (!names.size || !res.body) return res
   const headers = new Headers(res.headers)
   headers.delete("content-length")
@@ -991,7 +1001,7 @@ function renamed(res, names) {
   const dec = new TextDecoder()
   const enc = new TextEncoder()
   let rest = ""
-  const line = (l) => {
+  const line = (l: string) => {
     const m = /^data:\s?(.*)$/.exec(l)
     if (!m || m[1] === "[DONE]") return l
     try {
@@ -1006,7 +1016,7 @@ function renamed(res, names) {
       transform(chunk, ctl) {
         rest += dec.decode(chunk, { stream: true })
         const lines = rest.split("\n")
-        rest = lines.pop()
+        rest = lines.pop() ?? ""
         if (lines.length) ctl.enqueue(enc.encode(lines.map(line).join("\n") + "\n"))
       },
       flush(ctl) {
@@ -1022,20 +1032,20 @@ function renamed(res, names) {
 
 // poll asks path until WorkBuddy answers with data, retrying the codes
 // that mean "not yet".
-async function poll(site, path, headers, retry, deadline) {
+async function poll(site: Site, path: string, headers: Record<string, string>, retry: number[], deadline: number): Promise<WireRecord> {
   for (;;) {
     if (Date.now() > deadline) throw new Error(`${site.name} sign-in timed out`)
     try {
       const data = await call(site, "GET", path, headers)
       if (data && Object.keys(data).length) return data
     } catch (e) {
-      if (!(retry.includes(e.code) || e.status === 408 || e.status === 429)) throw e
+      if (!(e instanceof WBError && (retry.includes(e.code) || e.status === 408 || e.status === 429))) throw e
     }
     await sleep(POLL_MS)
   }
 }
 
-async function browserSignIn(site) {
+async function browserSignIn(site: Site): Promise<Authorization> {
   const state = await call(site, "POST", `/v2/plugin/auth/state?platform=${encodeURIComponent(site.platform)}`, {
     "X-No-Authorization": "true",
     "X-No-User-Id": "true",
@@ -1068,13 +1078,13 @@ async function browserSignIn(site) {
         a.enterpriseId = await enterpriseOf(site, a, who)
         return success(site, a, who.nickname || who.phoneNumber || who.uid)
       } catch (e) {
-        return { type: "failed", error: e.message }
+        return { type: "failed", error: errorDetails(e).message ?? String(e) }
       }
     },
   }
 }
 
-function success(site, a, name) {
+function success(site: Site, a: Account, name?: string): import("./types.ts").AuthResult {
   return {
     type: "success",
     refresh: a.refresh ?? "",
@@ -1090,7 +1100,7 @@ function success(site, a, name) {
 }
 
 // desktopFile is where WorkBuddy's desktop app keeps its sign-in.
-function desktopFile(site) {
+function desktopFile(site: Site) {
   const home = homedir()
   const base =
     process.platform === "darwin" ? join(home, "Library", "Application Support", "CodeBuddyExtension")
@@ -1101,7 +1111,7 @@ function desktopFile(site) {
 
 // readDesktop is WorkBuddy desktop's sign-in as the app keeps it now, null
 // for none (or tokens the app keeps encrypted, which can't be read).
-function readDesktop(site) {
+function readDesktop(site: Site): Account | null {
   try {
     const f = JSON.parse(readFileSync(desktopFile(site), "utf8"))
     const t = f?.auth ?? {}
@@ -1128,7 +1138,7 @@ function readDesktop(site) {
 // and later seal its tokens at rest ({$wbEncrypted: 1, envelope}), which
 // only the app itself opens (plugins#18), so the browser sign-in is the way;
 // else the app isn't signed in.
-function notDesktop(site) {
+function notDesktop(site: Site) {
   try {
     const t = JSON.parse(readFileSync(desktopFile(site), "utf8"))?.auth ?? {}
     if (t.accessToken?.$wbEncrypted || t.refreshToken?.$wbEncrypted)
@@ -1141,7 +1151,7 @@ function notDesktop(site) {
 // is copied (a copied refresh token would be the app's and the plugin's
 // both, and the first to use it would sign the other out); its file is
 // read each time, as the app keeps it.
-function desktopSignIn(site) {
+function desktopSignIn(site: Site): Authorization {
   return {
     url: "",
     instructions: `Uses the account ${site.name} desktop is signed in to.`,
@@ -1156,17 +1166,17 @@ function desktopSignIn(site) {
 
 // desktopHeld is what a desktop sign-in was renewed to here, by site and
 // account: kept in memory only, never written where the app keeps it.
-const desktopHeld = new Map()
+const desktopHeld = new Map<string, Account>()
 
 // current is the sign-in a stored auth names, fresh: WorkBuddy desktop's,
 // read where it keeps it, or one kept here.
-async function current(site, client, auth) {
+async function current(site: Site, client: Client | null, auth: Account): Promise<Account> {
   if (auth?.source !== "desktop") return fresh(site, client, auth)
   const d = readDesktop(site)
   if (!d) throw new Error(notDesktop(site))
   const k = site.id + "|" + d.uid
   const h = desktopHeld.get(k)
-  const a = await fresh(site, null, h && h.expires >= d.expires ? h : d)
+  const a = await fresh(site, null, h && (h.expires ?? 0) >= (d.expires ?? 0) ? h : d)
   desktopHeld.set(k, a)
   return a
 }
@@ -1176,7 +1186,7 @@ async function current(site, client, auth) {
 // STATUS_TEXT is Go's http.StatusText, which magpie's built-in said a
 // refused meter call with; a status Go has no words for is "HTTP <n>", so
 // the card always has an error.
-const STATUS_TEXT = {
+const STATUS_TEXT: Record<number, string> = {
   100: "Continue", 101: "Switching Protocols", 102: "Processing", 103: "Early Hints",
   200: "OK", 201: "Created", 202: "Accepted", 203: "Non-Authoritative Information", 204: "No Content", 205: "Reset Content",
   206: "Partial Content", 207: "Multi-Status", 208: "Already Reported", 226: "IM Used",
@@ -1193,10 +1203,10 @@ const STATUS_TEXT = {
   505: "HTTP Version Not Supported", 506: "Variant Also Negotiates", 507: "Insufficient Storage", 508: "Loop Detected",
   510: "Not Extended", 511: "Network Authentication Required",
 }
-const statusText = (n) => STATUS_TEXT[n] || `HTTP ${n}`
+const statusText = (n: number) => STATUS_TEXT[n] || `HTTP ${n}`
 
 // meterAsked is the billing API's reply to path, asked with a's sign-in.
-function meterAsked(site, a, path, body = {}, signal = AbortSignal.timeout(20000)) {
+function meterAsked(site: Site, a: Account, path: string, body: unknown = {}, signal: AbortSignal = AbortSignal.timeout(20000)) {
   return fetch(site.endpoint + path, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": "WorkBuddy/" + UA_VERSION,
@@ -1218,7 +1228,7 @@ function meterAsked(site, a, path, body = {}, signal = AbortSignal.timeout(20000
 // reset; with an accepted token 20 MB went through.
 const EDGE_READS = 2 * 1024 * 1024
 
-const byteLength = (b) =>
+const byteLength = (b: BodyInit | null | undefined) =>
   typeof b === "string" ? Buffer.byteLength(b) : b instanceof ArrayBuffer || ArrayBuffer.isView(b) ? b.byteLength : 0
 
 // unanswered is what a chat whose fetch failed with err comes to: a chat
@@ -1227,8 +1237,8 @@ const byteLength = (b) =>
 // size. A 401 there is the chat's own answer, said as one; anything else
 // leaves err as it was, as does a smaller chat, which the front door
 // answers itself. The chat isn't sent again.
-async function unanswered(site, a, body, err, signal) {
-  if (signal?.aborted || err?.name === "AbortError" || err?.name === "TimeoutError") throw err
+async function unanswered(site: Site, a: Account, body: BodyInit | null | undefined, err: unknown, signal?: AbortSignal | null): Promise<Response> {
+  if (signal?.aborted || errorDetails(err).name === "AbortError" || errorDetails(err).name === "TimeoutError") throw err
   const size = byteLength(body)
   if (size <= EDGE_READS) throw err
   let status = 0
@@ -1254,9 +1264,9 @@ async function unanswered(site, a, body, err, signal) {
 
 // meter asks the billing API as magpie's built-in did, its errors said
 // the same: WorkBuddy's message, else its code, else the HTTP status.
-async function meter(site, a, path, body = {}) {
+async function meter(site: Site, a: Account, path: string, body: unknown = {}): Promise<WireRecord | null> {
   const res = await meterAsked(site, a, path, body)
-  let env = {}
+  let env: WireRecord = {}
   try {
     env = JSON.parse(await res.text()) ?? {}
   } catch {}
@@ -1272,7 +1282,7 @@ async function meter(site, a, path, body = {}) {
 
 // capacity is a capacity the billing API sends, as a string ("438.88")
 // or now and then a number; empty is 0.
-function capacity(v) {
+function capacity(v: unknown) {
   if (v == null || v === "") return 0
   if (typeof v === "number") return v
   const s = String(v)
@@ -1282,14 +1292,14 @@ function capacity(v) {
 }
 
 // compact is a count as magpie says one: whole, else to two places.
-const compact = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, ""))
+const compact = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, ""))
 
 // usageOf is the account's credits, from its resource summary: the plan's
 // credits used against what the cycle grants, as magpie's built-in said —
 // the count itself too (amount of limit, in credits), for magpie to say it
 // as used or left beside the share (magpie#659).
-function usageOf(sum, plan) {
-  const out = { plan: plan || (sum?.IsPaidUser ? "Pro" : "Free"), windows: [] }
+function usageOf(sum: WireRecord | null, plan?: string): { plan: string; windows: UsageWindow[] } {
+  const out: { plan: string; windows: UsageWindow[] } = { plan: plan || (sum?.IsPaidUser ? "Pro" : "Free"), windows: [] }
   let total = 0, used = 0
   for (const p of sum?.Packages ?? []) {
     total += capacity(p?.CycleTotalCapacity)
@@ -1306,12 +1316,12 @@ function usageOf(sum, plan) {
 // packages at all. It counts the cycle's credits flat — credit used of
 // limitNum — and when the cycle began and resets (UTC+8). null when it
 // grants none.
-function enterpriseUsageOf(u) {
+function enterpriseUsageOf(u: WireRecord | null): UsageWindow | null {
   const limit = capacity(u?.limitNum)
   if (!(limit > 0)) return null
   const used = capacity(u?.credit)
-  const w = { name: "Credits", used: (100 * used) / limit, display: `${compact(used)} / ${compact(limit)}`, amount: used, limit, unit: "credits" }
-  const at = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(v.trim()) ? Date.parse(v.trim().replace(" ", "T") + "+08:00") : 0)
+  const w: UsageWindow = { name: "Credits", used: (100 * used) / limit, display: `${compact(used)} / ${compact(limit)}`, amount: used, limit, unit: "credits" }
+  const at = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(v.trim()) ? Date.parse(v.trim().replace(" ", "T") + "+08:00") : 0)
   const reset = at(u?.cycleResetTime), start = at(u?.cycleStartTime)
   if (reset > 0) w.resetsAt = new Date(reset).toISOString()
   if (reset > start && start > 0) w.span = (reset - start) / 1000
@@ -1326,9 +1336,9 @@ function enterpriseUsageOf(u) {
 // model free only some hours (a night promotion) is not free here, as in
 // the list (priceOf). A list that can't be read leaves the windows as they
 // are: every model counted, as before.
-async function spareFree(site, a, windows) {
+async function spareFree(site: Site, a: Account, windows: UsageWindow[]) {
   if (!windows.length) return windows
-  let free = []
+  let free: string[] = []
   try {
     free = (await liveModels(site, a)).filter((m) => m.free).map((m) => m.id)
   } catch {}
@@ -1339,7 +1349,7 @@ async function spareFree(site, a, windows) {
 // The packages' codes, as WorkBuddy's own client lists them when it asks
 // for each package's credits (its COMMODITY_CODES): the API refuses a
 // detail list without them (10001 "PackageCodes required").
-const CODE = (n, s) => `TCACA_code_${n}_${s}`
+const CODE = (n: string, s: string) => `TCACA_code_${n}_${s}`
 const PAID_CODES = [CODE("002", "AkiJS3ZHF5"), CODE("005", "maRGyrHhw1"), CODE("003", "FAnt7lcmRT"), CODE("023", "4xbGhMrE6q"),
   CODE("026", "BaESVICNoi"), CODE("027", "0FCGVA6vSa"), CODE("009", "0XmEQc2xOf"), CODE("038", "OhvqZtiPKr"), CODE("036", "lupO5WgNdG")]
 const DAILY_CODE = CODE("001", "PqouKr6QWV")
@@ -1352,14 +1362,14 @@ const SLICE = "4"
 
 // beijing is WorkBuddy's own time ("2026-10-13 00:39:27" is UTC+8, as its
 // DeductionEndTime for the same package says).
-const beijing = (ms) => new Date(ms + 8 * 3600_000).toISOString().slice(0, 19).replace("T", " ")
+const beijing = (ms: number) => new Date(ms + 8 * 3600_000).toISOString().slice(0, 19).replace("T", " ")
 
 // packagesOf is every package of the account with credits, paid and free,
 // as WorkBuddy's client asks for them: active and used-up (Status 0, 3),
 // up to 10 pages of 200.
-async function packagesOf(site, a, now = Date.now()) {
+async function packagesOf(site: Site, a: Account, now = Date.now()): Promise<WireRecord[]> {
   const day = beijing(now).slice(0, 10)
-  const lists = [
+  const lists: [string, WireRecord][] = [
     ["/billing/meter/get-user-resource-paid-packages", { PackageCodes: PAID_CODES, NeedRenewInfo: true }],
     ["/billing/meter/get-user-resource-free-packages", { PackageCodes: FREE_CODES, SlicePeriodStartTime: day + " 00:00:00", SlicePeriodEndTime: day + " 23:59:59" }],
   ]
@@ -1377,7 +1387,7 @@ async function packagesOf(site, a, now = Date.now()) {
 
 // endOf is when a package's credits are lost: its DeductionEndTime, else
 // ExpiredTime, else the cycle's end (UTC+8), as WorkBuddy's client reads it.
-function endOf(p) {
+function endOf(p: WireRecord | null) {
   const ms = Number(p?.DeductionEndTime)
   if (ms > 0) return ms
   for (const v of [p?.ExpiredTime, p?.CycleEndTime]) {
@@ -1392,8 +1402,8 @@ function endOf(p) {
 // packages are lost, and how many (cdredfox on X): smart routing spends
 // the account whose credits expire first. Only packages the summary
 // counts, with credits left, and not the daily slice; null when none.
-function runsOutOf(sum, packages, now = Date.now()) {
-  const counted = new Set((sum?.Packages ?? []).map((p) => p?.PackageCode))
+function runsOutOf(sum: WireRecord | null, packages: WireRecord[] | null, now = Date.now()) {
+  const counted = new Set(((sum?.Packages ?? []) as WireRecord[]).map((p) => p?.PackageCode))
   let at = 0, amount = 0
   for (const p of packages ?? []) {
     if (!counted.has(p?.PackageCode) || p?.PackageCode === DAILY_CODE || String(p?.CapacityType) === SLICE) continue
@@ -1409,11 +1419,11 @@ function runsOutOf(sum, packages, now = Date.now()) {
 // ---- models -----------------------------------------------------------------
 
 // variants are the reasoning levels as OpenCode gives them to the AI SDK.
-function variants(efforts) {
+function variants(efforts?: string[]) {
   return Object.fromEntries((efforts ?? []).map((e) => [e, { reasoningEffort: e }]))
 }
 
-function configModels(site) {
+function configModels(site: Site) {
   return Object.fromEntries(site.models.map(([id, name, context, efforts]) => [id, {
     name,
     limit: { context, output: 0 },
@@ -1422,7 +1432,7 @@ function configModels(site) {
   }]))
 }
 
-function modelOf(site, provider, m) {
+function modelOf(site: Site, provider: ProviderInfo, m: LiveModel) {
   return {
     id: m.id,
     providerID: provider.id,
@@ -1460,7 +1470,7 @@ function modelOf(site, provider, m) {
 // by it: "x0.03", "0" or 0; "x0.00" is free. A rate it can't read (or
 // none, or an infinite one) is undefined: the model is neither free nor
 // rated. The same rule as magpie's built-in (wbCredits).
-function creditsOf(c) {
+function creditsOf(c: unknown) {
   if (c == null || c === "") return undefined
   const s = String(c).trim().toLowerCase().replace(/\s+credits?$/, "").replace(/^x/, "")
   const n = Number(s)
@@ -1469,13 +1479,13 @@ function creditsOf(c) {
 
 // freeCredits says whether a model's credits are none: "x0.00", "0" or 0.
 // A rate it can't read is not free.
-function freeCredits(c) {
+function freeCredits(c: unknown) {
   return creditsOf(c) === 0
 }
 
 // discountOf reads a promotion's price: its discountedCredits ("0.50x",
 // "0.00x"), else the factor times the model's own credits.
-function discountOf(p, base) {
+function discountOf(p: WireRecord, base: number | undefined) {
   const said = creditsOf(String(p.discount?.discountedCredits ?? "").trim().replace(/x$/i, ""))
   if (said !== undefined) return said
   const f = Number(p.discount?.factor)
@@ -1484,7 +1494,7 @@ function discountOf(p, base) {
 
 // running says whether a promotion is on at now: enabled, and inside its
 // validFrom..validUntil. Its daily hours are not looked at here.
-function running(p, now) {
+function running(p: WireRecord, now: number) {
   if (!p || p.enabled === false) return false
   const from = Date.parse(p.schedule?.validFrom ?? "")
   const until = Date.parse(p.schedule?.validUntil ?? "")
@@ -1499,7 +1509,7 @@ function running(p, now) {
 // asked for at night would otherwise say "free" all day (#121). A discount
 // for whole days (Step-5-Preview's 独家限免) is the price now, with the
 // price before it as rateWas.
-function priceOf(d, promotions, now = Date.now()) {
+function priceOf(d: WireRecord, promotions?: WireRecord[], now = Date.now()): Pick<LiveModel, "free" | "rate" | "rateWas"> {
   const base = creditsOf(d.credits)
   const mine = (Array.isArray(promotions) ? promotions : []).filter(
     (p) => p?.kind === "discount" && Array.isArray(p.modelIds) && p.modelIds.includes(d.id) && running(p, now),
@@ -1526,7 +1536,7 @@ function priceOf(d, promotions, now = Date.now()) {
 // and a default reasoning.effort. Those take low, high and max (each
 // reasoned under a real account, on four of them) and their own default.
 const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"]
-function effortsOf(d) {
+function effortsOf(d: WireRecord): string[] {
   const said = d.reasoning?.supportedEfforts
   if (Array.isArray(said) && said.length) return said
   if (d.supportsReasoning !== true) return []
@@ -1535,7 +1545,7 @@ function effortsOf(d) {
   return EFFORT_ORDER.filter((e) => set.has(e))
 }
 
-async function liveModels(site, a) {
+async function liveModels(site: Site, a: Account): Promise<LiveModel[]> {
   const headers = new Headers()
   sign(site, a, headers)
   headers.set("User-Agent", `CLI/${APP_VERSION} WorkBuddy/${UA_VERSION}`)
@@ -1550,8 +1560,8 @@ async function liveModels(site, a) {
   for (const agent of cfg.agents ?? []) {
     if (agent.name !== "cli") continue
     for (const id of agent.models ?? []) {
-      const d = (cfg.models ?? []).find((x) => x.id === id)
-      const m = { id, name: d?.name || id }
+      const d = ((cfg.models ?? []) as WireRecord[]).find((x) => x.id === id)
+      const m: LiveModel = { id, name: d?.name || id }
       if (d) {
         m.context = d.maxInputTokens
         m.output = d.maxOutputTokens
@@ -1599,7 +1609,7 @@ const AFTER_TOOLS_REFUSED = /must end with a user message|["']code["']\s*:\s*["'
 // message as a user's, where folded into the tool's result it was read as
 // the tool's output and its ask left undone. null for any other chat — one
 // ending with the assistant's message is a prefill, refused as it is.
-function replyAfterTools(body) {
+function replyAfterTools(body: unknown): string | null {
   const b = chatOf(body)
   const msgs = b?.messages
   if (!Array.isArray(msgs)) return null
@@ -1610,7 +1620,7 @@ function replyAfterTools(body) {
   return JSON.stringify(b)
 }
 
-function makePlugin(site) {
+function makePlugin(site: Site): MagpiePlugin {
   // the models of this site that refused tool results then the user's
   // message, for this run: their next chats go with replyAfterTools at once
   const endsAfterTools = new Set()
@@ -1682,7 +1692,7 @@ function makePlugin(site) {
             const fit = fitted(body)
             body = normalizeToolChoice(fit.body)
             attend(headers, body, session)
-            const send = (b) =>
+            const send = (b: BodyInit | null | undefined) =>
               fetch(req ? req.url : input, { ...init, method: init?.method ?? req?.method, headers, body: b }).catch((e) => unanswered(site, a, b, e, init?.signal))
             // a model known to turn tool results then the user's message away
             // gets the empty reply between them up front (see endsAfterTools)
@@ -1691,7 +1701,7 @@ function makePlugin(site) {
             // words at once (see systemAsUser)
             const sysKey = systemKey(body)
             if (sysKey && refusedSystems.has(sysKey)) body = systemAsUser(body) ?? body
-            const shaped = (b) => (endsAfterTools.has(model) ? replyAfterTools(b) ?? b : b)
+            const shaped = (b: BodyInit | null | undefined) => (endsAfterTools.has(model) ? replyAfterTools(b) ?? b : b)
             let res = await send(shaped(body))
             if (res.status === 400) {
               let text = await res.text()
@@ -1748,7 +1758,7 @@ function makePlugin(site) {
           await spareFree(site, a, out.windows)
           return { ...out, signIn: "kept" }
         } catch (e) {
-          return { error: e?.message ?? String(e), signIn: "kept" }
+          return { error: errorDetails(e).message ?? String(e), signIn: "kept" }
         }
       },
       methods: [
@@ -1803,7 +1813,7 @@ const EXHAUSTED_TEXT = /credits exhausted|额度已用尽|["']code["']\s*:\s*["'
 
 // kept is an answer that went through, saying the sign-in is kept: the
 // built-in never cleared a WorkBuddy account's mark, as it never set one.
-function kept(res) {
+function kept(res: Response) {
   const headers = new Headers(res.headers)
   headers.set("X-Magpie-Sign-In", "kept")
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
@@ -1812,9 +1822,9 @@ function kept(res) {
 // explained is res with REFUSED_HINT, RESTRICTED_HINT or EXHAUSTED_HINT added to that refusal's message.
 // Each refusal says the sign-in is kept: the built-in passed WorkBuddy's
 // 401 on and never marked a WorkBuddy account lapsed.
-async function explained(res) {
+async function explained(res: Response) {
   const text = await res.text()
-  const again = (b) => {
+  const again = (b: string) => {
     const headers = new Headers(res.headers)
     headers.delete("content-length")
     headers.delete("content-encoding")

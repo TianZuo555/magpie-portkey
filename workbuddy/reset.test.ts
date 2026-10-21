@@ -1,3 +1,5 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // WorkBuddy's front door answers a sign-in it refuses with 401, but only
 // for a request of up to 2 MiB: past that it resets the connection, and a
 // long Claude Code session's every turn failed as ECONNRESET (wyp on
@@ -5,7 +7,7 @@
 // socket, so Bun's fetch meets the same reset it met on www.workbuddy.ai.
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import net from "node:net"
-import { WorkBuddyAIAuthPlugin, WorkBuddyAuthPlugin, _internal } from "./index.mjs"
+import { WorkBuddyAIAuthPlugin, WorkBuddyAuthPlugin, _internal } from "./index.ts"
 
 const { EDGE_READS } = _internal
 const GOOD = "Bearer good"
@@ -20,7 +22,7 @@ beforeAll(async () => {
     let buf = Buffer.alloc(0)
     let head = null
     s.on("error", () => {})
-    s.on("data", (d) => {
+    s.on("data", (d: Buffer) => {
       buf = Buffer.concat([buf, d])
       if (!head) {
         const end = buf.indexOf("\r\n\r\n")
@@ -60,7 +62,7 @@ afterAll(() => server.close())
 // with the site (WorkBuddy AI's, else the China build's) served by the fake
 async function chat(token, size, plugin = WorkBuddyAIAuthPlugin, site = "https://www.workbuddy.ai") {
   const realFetch = globalThis.fetch
-  globalThis.fetch = (u, init) => realFetch(String(u instanceof Request ? u.url : u).replace(site, origin), init)
+  setFetch((u, init) => realFetch(String(u instanceof Request ? u.url : u).replace(site, origin), init))
   try {
     const hooks = await plugin({ client: {} })
     const loader = await hooks.auth.loader(async () => ({ type: "oauth", access: token, uid: "uid", expires: Date.now() + 3600_000 }))
@@ -72,9 +74,9 @@ async function chat(token, size, plugin = WorkBuddyAIAuthPlugin, site = "https:/
         { role: "user", content: "x".repeat(size) },
       ],
     })
-    return await loader.fetch(site + "/v2/chat/completions", { method: "POST", body })
+    return await chatFetch(loader)(site + "/v2/chat/completions", { method: "POST", body })
   } finally {
-    globalThis.fetch = realFetch
+    setFetch(realFetch)
   }
 }
 

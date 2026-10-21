@@ -40,7 +40,8 @@
   "scripts": {
     "test": "bun test test/",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test && npm run test:workbuddy",
+    "check": "npm run typecheck && npm test && npm run typecheck:workbuddy && npm run test:workbuddy",
+    "typecheck:workbuddy": "tsc --noEmit -p workbuddy/tsconfig.json && tsc --noEmit -p workbuddy/tsconfig.test.json",
     "test:workbuddy": "workbuddy_test_home=$(mktemp -d) && trap 'rm -rf \"$workbuddy_test_home\"' EXIT && HOME=\"$workbuddy_test_home\" bun test workbuddy/"
   },
   "pi": {
@@ -59,6 +60,7 @@
   "devDependencies": {
     "@earendil-works/pi-ai": "1.2.0",
     "@earendil-works/pi-coding-agent": "1.2.0",
+    "@types/bun": "^1.4.3",
     "@types/node": "^26.0.0",
     "typescript": "^5.9.3"
   }

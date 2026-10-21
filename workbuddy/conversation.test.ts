@@ -1,3 +1,5 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // One user send is one request to WorkBuddy's backend, whatever it takes:
 // every step of it — a tool result sent back, a retry, another account
 // answering — carries the same X-Conversation-Request-ID, and the user's next
@@ -5,26 +7,26 @@
 // X-Conversation-ID, from the session magpie (or OpenCode) names, else from
 // the chat's first user message; each request has a message id of its own.
 import { afterEach, expect, test } from "bun:test"
-import { WorkBuddyAIAuthPlugin, WorkBuddyAuthPlugin, _internal } from "./index.mjs"
+import { WorkBuddyAIAuthPlugin, WorkBuddyAuthPlugin, _internal } from "./index.ts"
 
 const { SESSION, signatureOf } = _internal
 const real = globalThis.fetch
-afterEach(() => (globalThis.fetch = real))
+afterEach(() => (setFetch(real)))
 
 // ask sends a chat as magpie's host does: the chat.headers hook is told the
 // session, then the loader's fetch is given what it added, and the request
 // WorkBuddy was sent is read back. Nothing leaves the machine.
-async function ask(body, { session = "", provider = "workbuddy", plugin = WorkBuddyAuthPlugin, headers = {} } = {}) {
+async function ask(body, { session = "", provider = "workbuddy", plugin = WorkBuddyAuthPlugin, headers = {} }: { session?: string; provider?: string; plugin?: MagpiePlugin; headers?: Record<string, string> } = {}) {
   const sent = []
-  globalThis.fetch = async (url, init) => {
+  setFetch(async (url, init) => {
     sent.push(new Headers(init?.headers))
     return new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
-  }
+  })
   const hooks = await plugin({ client: {} })
   const out = { headers: { ...headers } }
-  await hooks["chat.headers"]({ sessionID: session, model: { providerID: provider, id: "glm-5.3" }, provider: { info: { id: provider } } }, out)
+  await hooks["chat.headers"]({ sessionID: session, model: { providerID: provider, id: "glm-5.3" } as { providerID: string }, provider: { info: { id: provider } } }, out)
   const l = await hooks.auth.loader(async () => ({ type: "oauth", access: "tok", uid: "u1", expires: Date.now() + 3600_000 }))
-  const res = await l.fetch("https://copilot.tencent.com/v2/chat/completions", {
+  const res = await chatFetch(l)("https://copilot.tencent.com/v2/chat/completions", {
     method: "POST",
     headers: new Headers(out.headers),
     body: typeof body === "string" ? body : JSON.stringify(body),
@@ -131,7 +133,7 @@ test("both builds carry what the usage list shows as the client (使用端)", as
     "x-agent-intent": "craft",
     "x-requested-with": "XMLHttpRequest",
   }
-  for (const [provider, plugin] of [["workbuddy", WorkBuddyAuthPlugin], ["workbuddy-ai", WorkBuddyAIAuthPlugin]]) {
+  for (const [provider, plugin] of [["workbuddy", WorkBuddyAuthPlugin], ["workbuddy-ai", WorkBuddyAIAuthPlugin]] as const) {
     const h = await ask(send("hi"), { provider, plugin })
     for (const [name, want] of Object.entries(attribution)) {
       expect([provider, name, h.get(name)]).toEqual([provider, name, want])

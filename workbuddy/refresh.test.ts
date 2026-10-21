@@ -1,3 +1,5 @@
+import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // auth.refresh: magpie renews a browser sign-in ahead of time, through the
 // same one-refresh-at-a-time as a request's, and saves what it gives.
 import { test, expect, afterAll, beforeAll, afterEach } from "bun:test"
@@ -7,14 +9,14 @@ import { realpathSync } from "node:fs"
 let WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal
 beforeAll(async () => {
   if (![tmpdir(), realpathSync(tmpdir())].some((t) => homedir().startsWith(t))) throw new Error("run with HOME=$(mktemp -d) bun test")
-  ;({ WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } = await import("./index.mjs"))
+  ;({ WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } = await import("./index.ts"))
 })
 const offline = async () => { throw new Error("no network in tests") }
 const real = globalThis.fetch
-globalThis.fetch = offline
-afterAll(() => (globalThis.fetch = real))
+setFetch(offline)
+afterAll(() => (setFetch(real)))
 afterEach(() => {
-  globalThis.fetch = offline
+  setFetch(offline)
   _internal.renewing.clear()
   _internal.renewed.clear()
 })
@@ -22,9 +24,9 @@ afterEach(() => {
 const ok = (data) => new Response(JSON.stringify({ code: 0, msg: "ok", data }))
 
 // serve answers WorkBuddy's refresh (after gate, when given) and chats.
-function serve(answer, gate) {
+function serve(answer, gate?) {
   const calls = []
-  globalThis.fetch = async (url, init) => {
+  setFetch(async (url, init) => {
     const u = new URL(String(url))
     calls.push({ url: u, headers: new Headers(init?.headers) })
     if (u.pathname === "/v2/plugin/auth/token/refresh") {
@@ -32,7 +34,7 @@ function serve(answer, gate) {
       return answer(init)
     }
     return new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
-  }
+  })
   return calls
 }
 const refreshes = (calls) => calls.filter((c) => c.url.pathname === "/v2/plugin/auth/token/refresh")
@@ -67,7 +69,7 @@ test("auth.refresh and a request's refresh at once spend the refresh token once"
   const hooks = await WorkBuddyAuthPlugin({ client: { auth: { set: async (x) => sets.push(x) } } })
   const stored = auth({ expires: Date.now() + 30 * 1000 }) // stale for a request too
   const opts = await hooks.auth.loader(async () => stored)
-  const req = opts.fetch("https://copilot.tencent.com/v2/chat/completions", { method: "POST", body: "{}" })
+  const req = chatFetch(opts)("https://copilot.tencent.com/v2/chat/completions", { method: "POST", body: "{}" })
   const hook = hooks.auth.refresh(stored, "workbuddy")
   await new Promise((ok) => setTimeout(ok, 10))
   open()
