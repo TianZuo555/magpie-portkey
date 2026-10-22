@@ -1,6 +1,20 @@
 # magpie-portkey
 
-A [Magpie](https://github.com/yetone/magpie) provider for AWS Bedrock models through [Portkey](https://portkey.ai). It uses Magpie’s official pi package bridge and the Bedrock AI SDK transport. The same package also works in pi.
+Providers for [Magpie](https://github.com/yetone/magpie) and [pi](https://pi.dev).
+
+| Folder | Provider ids | What it is |
+|---|---|---|
+| this folder | `portkey-aws` | AWS Bedrock through [Portkey](https://portkey.ai) |
+| [`workbuddy/`](workbuddy/) | `workbuddy`, `workbuddy-ai` | TypeScript backup of the original Magpie/OpenCode plugin, including desktop sign-in |
+
+The `workbuddy/` folder is a TypeScript conversion of the original plugin from
+[`magpie-community/plugins`](https://github.com/magpie-community/plugins/tree/af360a529df5295e9c31fefe81e3158802ca0f3a/packages/workbuddy),
+version `0.1.29`. It uses Magpie's native plugin hooks and has no pi extension
+manifest. See [conversion provenance and local installation](workbuddy/BACKUP.md).
+
+## Portkey AWS Bedrock
+
+A provider for AWS Bedrock models through Portkey. It uses Magpie’s official pi package bridge and the Bedrock AI SDK transport. The same package also works in pi.
 
 The provider id is **`portkey-aws`**. Its models are available to every agent connected to Magpie.
 
@@ -98,6 +112,8 @@ Tested with pi 1.2.0 and Magpie’s Bun plugin host.
 npm install --ignore-scripts
 npm run check
 ```
+
+Type checking uses [`tsrs`](https://www.npmjs.com/package/tsrs), the Rust port of the TypeScript 7 compiler, instead of `tsc`.
 
 Tests use real AWS event-stream frames against the Bedrock SDK to verify authentication, conversion, tools, images, reasoning, cache markers, usage, Unicode chunk boundaries, aborts and failures. No live credentials are used.
 

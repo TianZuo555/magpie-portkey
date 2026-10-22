@@ -1,0 +1,16 @@
+{
+  "name": "@magpie-community/opencode-workbuddy-auth",
+  "version": "0.1.29",
+  "description": "OpenCode provider plugins for WorkBuddy's plans: WorkBuddy (CodeBuddy, copilot.tencent.com) and WorkBuddy AI (www.workbuddy.ai)",
+  "type": "module",
+  "main": "./index.ts",
+  "exports": "./index.ts",
+  "files": ["index.ts", "types.ts", "README.md", "BACKUP.md", "LICENSE"],
+  "scripts": {
+    "typecheck": "tsrs --noEmit -p tsconfig.json && tsrs --noEmit -p tsconfig.test.json",
+    "test": "workbuddy_test_home=$(mktemp -d) && trap 'rm -rf \"$workbuddy_test_home\"' EXIT && HOME=\"$workbuddy_test_home\" bun test ./"
+  },
+  "keywords": ["magpie-plugin", "opencode", "opencode-plugin", "workbuddy", "codebuddy"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/magpie-community/plugins.git", "directory": "packages/workbuddy" }
+}
