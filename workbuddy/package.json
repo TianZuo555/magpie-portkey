@@ -13,7 +13,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "tsrs --noEmit -p tsconfig.json && tsrs --noEmit -p tsconfig.test.json",
     "test": "workbuddy_test_home=$(mktemp -d) && trap 'rm -rf \"$workbuddy_test_home\"' EXIT && HOME=\"$workbuddy_test_home\" bun test ./"
   },
   "keywords": [
