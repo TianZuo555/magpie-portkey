@@ -39,9 +39,9 @@
   },
   "scripts": {
     "test": "bun test test/",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsrs --noEmit",
     "check": "npm run typecheck && npm test && npm run typecheck:workbuddy && npm run test:workbuddy",
-    "typecheck:workbuddy": "tsc --noEmit -p workbuddy/tsconfig.json && tsc --noEmit -p workbuddy/tsconfig.test.json",
+    "typecheck:workbuddy": "tsrs --noEmit -p workbuddy/tsconfig.json && tsrs --noEmit -p workbuddy/tsconfig.test.json",
     "test:workbuddy": "workbuddy_test_home=$(mktemp -d) && trap 'rm -rf \"$workbuddy_test_home\"' EXIT && HOME=\"$workbuddy_test_home\" bun test workbuddy/"
   },
   "pi": {
@@ -62,6 +62,6 @@
     "@earendil-works/pi-coding-agent": "1.2.0",
     "@types/bun": "^1.4.3",
     "@types/node": "^26.0.0",
-    "typescript": "^5.9.3"
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929"
   }
 }
