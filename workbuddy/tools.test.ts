@@ -171,3 +171,43 @@ test("a property named enum, type or required is a name, not a keyword", () => {
   const body = chat([tool("t", structuredClone(p))])
   expect(fitted(body).body).toBe(body)
 })
+
+// Kimi K3.1 Pro answers 400 "Invalid request parameters" to a oneOf with no
+// type, even of objects only, and takes it with "type": "object" beside it
+// (congee949, #378). The parameters below are the issue's own.
+const ab = [
+  { type: "object", properties: { mode: { type: "string", const: "a" } } },
+  { type: "object", properties: { mode: { type: "string", const: "b" } } },
+]
+
+test("a $ref's target that is a oneOf of objects with no type is typed object", () => {
+  const body = JSON.stringify({ model: "kimi-k3.1-pro", messages: [{ role: "user", content: "Do not call tools. Reply exactly OK." }], tools: [{ type: "function", function: { name: "probe", description: "Diagnostic placeholder.", parameters: { type: "object", properties: { x: { $ref: "#/$defs/X" } }, $defs: { X: { oneOf: ab } } } } }] })
+  const ps = JSON.parse(fitted(body).body as string).tools[0].function.parameters
+  expect(ps.$defs.X).toEqual({ oneOf: ab, type: "object" })
+  expect(ps.properties.x).toEqual({ $ref: "#/$defs/X" })
+})
+
+test("a oneOf of objects inside a $ref's target, and one whose branches are $refs to objects, are typed object", () => {
+  const ps: any = { type: "object", properties: { x: { $ref: "#/$defs/X" } }, $defs: { X: { type: "object", properties: { y: { oneOf: ab } }, required: ["y"] } } }
+  expect(_internal.typeUnions(ps)).toBe(true)
+  expect(ps.$defs.X.properties.y.type).toBe("object")
+  const refs: any = { type: "object", properties: { s: { $ref: "#/$defs/__schema0" } }, $defs: { __schema0: { oneOf: [{ $ref: "#/$defs/__schema1" }, { $ref: "#/$defs/__schema3" }] }, __schema1: { type: "object", properties: { launch: { type: "boolean" } } }, __schema2: { $ref: "#/$defs/__schema1" }, __schema3: { $ref: "#/$defs/__schema4" }, __schema4: { type: "object", properties: { connect: { type: "string" } } } } }
+  expect(_internal.typeUnions(refs)).toBe(true)
+  expect(refs.$defs.__schema0.type).toBe("object")
+  expect(refs.$defs.__schema2.type).toBeUndefined()
+})
+
+test("a oneOf that is typed, mixed, an anyOf, or reaches a missing, external or circular $ref is left", () => {
+  const ps: any = { type: "object", properties: {
+    typed: { type: "object", oneOf: ab },
+    mixed: { oneOf: [ab[0], { type: "string" }] },
+    any: { anyOf: ab },
+    missing: { oneOf: [ab[0], { $ref: "#/$defs/Nope" }] },
+    external: { oneOf: [ab[0], { $ref: "other.json#/X" }] },
+    loop: { oneOf: [ab[0], { $ref: "#/$defs/A" }] },
+    examples: { type: "array", examples: [{ oneOf: ab }] },
+  }, $defs: { A: { $ref: "#/$defs/B" }, B: { $ref: "#/$defs/A" } } }
+  const before = structuredClone(ps)
+  expect(_internal.typeUnions(ps)).toBe(false)
+  expect(ps).toEqual(before)
+})

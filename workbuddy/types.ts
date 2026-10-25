@@ -12,6 +12,7 @@ export interface Site {
   ai: boolean
   models: ModelSeed[]
   noImages?: RegExp
+  messages?: boolean
 }
 export interface Account {
   type?: string
@@ -60,7 +61,7 @@ export interface Usage {
   plan?: string
   windows?: UsageWindow[]
   error?: string
-  signIn: "kept"
+  signIn: "kept" | "renewed" | "expired"
 }
 export type GetAuth = () => Promise<Account | null | undefined>
 export interface AuthResult extends Account {

@@ -9,7 +9,7 @@ import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 import { afterEach, expect, test } from "bun:test"
 import { WorkBuddyAIAuthPlugin, WorkBuddyAuthPlugin, _internal } from "./index.ts"
 
-const { SESSION, signatureOf } = _internal
+const { SESSION, signatureOf, desktopVersion, SITES } = _internal
 const real = globalThis.fetch
 afterEach(() => (setFetch(real)))
 
@@ -43,7 +43,7 @@ const send = (text) => chat(system, { role: "user", content: text })
 const later = (first, text) => chat(system, { role: "user", content: first }, { role: "assistant", content: "hi" }, { role: "user", content: text })
 const call = { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "read", arguments: "{}" } }] }
 const result = { role: "tool", tool_call_id: "c1", content: "a.go" }
-const HEX32 = /^[0-9a-f]{32}$/
+const UUID7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const turn = (h) => h.get("x-conversation-request-id")
 const conv = (h) => h.get("x-conversation-id")
 const message = (h) => h.get("x-conversation-message-id")
@@ -53,7 +53,7 @@ test("one send's steps carry one turn id; the user's next message another", asyn
   const called = await ask(chat(system, { role: "user", content: "跑一下" }, call))
   const answered = await ask(chat(system, { role: "user", content: "跑一下" }, call, result))
   const ids = [asked, called, answered].map(turn)
-  expect(ids[0]).toMatch(HEX32)
+  expect(ids[0]).toMatch(UUID7)
   expect(new Set(ids).size).toBe(1)
   // the user's next message is another turn
   expect(turn(await ask(later("跑一下", "再来一次")))).not.toBe(ids[0])
@@ -68,7 +68,7 @@ test("one send's steps carry one turn id; the user's next message another", asyn
 test("a conversation's turns share one id, named by the session magpie gives", async () => {
   const one = await ask(send("fix the bug"), { session: "ses_1" })
   const two = await ask(later("fix the bug", "and then?"), { session: "ses_1" })
-  expect(conv(one)).toMatch(HEX32)
+  expect(conv(one)).toMatch(UUID7)
   expect(conv(two)).toBe(conv(one))
   // another session is another conversation, the same words or not
   const other = await ask(send("fix the bug"), { session: "ses_2" })
@@ -80,7 +80,7 @@ test("a conversation's turns share one id, named by the session magpie gives", a
 test("with no session, the first user message names the conversation", async () => {
   const one = await ask(send("hi"))
   const two = await ask(chat(system, { role: "user", content: "hi" }, { role: "assistant", content: "hi" }, call, result))
-  expect(conv(one)).toMatch(HEX32)
+  expect(conv(one)).toMatch(UUID7)
   // a step of the same send: the same conversation, and the same turn
   expect(conv(two)).toBe(conv(one))
   expect(turn(two)).toBe(turn(one))
@@ -91,7 +91,7 @@ test("with no session, the first user message names the conversation", async () 
   expect(conv(await ask(send("hello")))).not.toBe(conv(one))
   // an image of its own is a conversation's first message too, and signs it
   const image = await ask(chat(system, { role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AA" } }] }))
-  expect(conv(image)).toMatch(HEX32)
+  expect(conv(image)).toMatch(UUID7)
   expect(conv(image)).not.toBe(conv(one))
 })
 
@@ -99,11 +99,11 @@ test("nothing names a conversation: no conversation id, the turn's still there",
   // no user message at all
   const none = await ask(chat(system))
   expect(conv(none)).toBe(null)
-  expect(turn(none)).toMatch(HEX32)
+  expect(turn(none)).toMatch(UUID7)
   // a body that isn't a chat
   const bytes = await ask("not json")
   expect(conv(bytes)).toBe(null)
-  expect(turn(bytes)).toMatch(HEX32)
+  expect(turn(bytes)).toMatch(UUID7)
   expect(new Set([turn(none), turn(bytes)]).size).toBe(2)
 })
 
@@ -115,10 +115,10 @@ test("a caller's own ids are kept", async () => {
 
 test("WorkBuddy AI takes the ids too, with its client's headers", async () => {
   const ai = await ask(send("hi"), { provider: "workbuddy-ai", plugin: WorkBuddyAIAuthPlugin })
-  expect(turn(ai)).toMatch(HEX32)
-  expect(conv(ai)).toMatch(HEX32)
+  expect(turn(ai)).toMatch(UUID7)
+  expect(conv(ai)).toMatch(UUID7)
   expect(ai.get("x-ide-name")).toBe("WorkBuddy")
-  expect(ai.get("user-agent")).toBe("WorkBuddy/5.5.6")
+  expect(ai.get("user-agent")).toBe(`WorkBuddy/${desktopVersion(SITES["workbuddy-ai"])} WorkBuddy/${desktopVersion(SITES["workbuddy-ai"])} CLI/2.161.0`)
 })
 
 test("both builds carry what the usage list shows as the client (使用端)", async () => {
@@ -128,7 +128,6 @@ test("both builds carry what the usage list shows as the client (使用端)", as
     "x-agent-purpose": "conversation",
     "x-ide-name": "WorkBuddy",
     "x-ide-type": "WorkBuddy",
-    "x-ide-version": "5.5.6",
     "x-product": "SaaS",
     "x-agent-intent": "craft",
     "x-requested-with": "XMLHttpRequest",
@@ -138,6 +137,7 @@ test("both builds carry what the usage list shows as the client (使用端)", as
     for (const [name, want] of Object.entries(attribution)) {
       expect([provider, name, h.get(name)]).toEqual([provider, name, want])
     }
+    expect([provider, h.get("x-ide-version")]).toEqual([provider, desktopVersion(SITES[provider])])
   }
 })
 
@@ -183,7 +183,7 @@ test("a tool result's image sent as a user message is not a turn of its own", as
     await ask(chat(...head, call, result, attached("AA"))),
     await ask(chat(...head, call, result, attached("AA"), call2, result2, attached("BB"))),
   ].map(turn)
-  expect(ids[0]).toMatch(HEX32)
+  expect(ids[0]).toMatch(UUID7)
   expect(new Set(ids).size).toBe(1)
 })
 

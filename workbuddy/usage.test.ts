@@ -59,14 +59,14 @@ test("a paid WorkBuddy account's credits", async () => {
   expect(c.init.body).toBe("{}")
   expect(Object.fromEntries(["authorization", "x-user-id", "x-domain", "x-product", "x-ide-type", "user-agent"].map((h) => [h, c.headers.get(h)])))
     .toEqual({ authorization: "Bearer two-access", "x-user-id": "u2", "x-domain": "copilot.tencent.com", "x-product": "SaaS",
-      "x-ide-type": "WorkBuddy", "user-agent": "WorkBuddy/5.5.6" })
+      "x-ide-type": "WorkBuddy", "user-agent": "axios/1.16.1" })
 })
 
 test("a free WorkBuddy AI account, at its own site and domain", async () => {
   const calls = serve({ "/billing/meter/get-user-resource-summary": () =>
     ok({ IsPaidUser: false, Packages: [{ CycleTotalCapacity: "1000", CycleUsedCapacity: "100" }] }) })
   const auth = { type: "oauth", access: "ai-access", expires: later(), uid: "ai2", domain: "www.codebuddy.ai" }
-  expect(await usageOf(WorkBuddyAIAuthPlugin, auth)).toEqual({ signIn: "kept", plan: "Free", windows: [{ name: "Credits", used: 10, display: "100 / 1000", amount: 100, limit: 1000, unit: "credits" }] })
+  expect(await usageOf(WorkBuddyAIAuthPlugin, auth)).toEqual({ signIn: "kept", plan: "Free plan", windows: [{ name: "Credits", used: 10, display: "100 / 1000", amount: 100, limit: 1000, unit: "credits" }] })
   expect(calls[0].url.origin).toBe("https://www.workbuddy.ai")
   expect(calls[0].headers.get("x-domain")).toBe("www.codebuddy.ai")
 })
@@ -76,14 +76,16 @@ test("counts and plans as Go says them", () => {
     .toEqual({ plan: "Team", windows: [{ name: "Credits", used: (100 * 438.88000002) / 3300, display: "438.88 / 3300", amount: 438.88000002, limit: 3300, unit: "credits" }] })
   // no capacity, no window
   expect(_internal.usageOf({ IsPaidUser: false, Packages: [{ CycleTotalCapacity: "", CycleUsedCapacity: null }] }, ""))
-    .toEqual({ plan: "Free", windows: [] })
+    .toEqual({ plan: "Free plan", windows: [] })
   expect(() => _internal.usageOf({ Packages: [{ CycleTotalCapacity: "lots" }] })).toThrow('strconv.ParseFloat: parsing "lots": invalid syntax')
 })
 
 test("WorkBuddy's refusals are the card's error", async () => {
   const auth = { type: "oauth", access: "a", expires: later(), uid: "u" }
+  // a bare 401 (no invalid_token) with nothing to renew with: said, not marked
   serve({ "/billing/meter/get-user-resource-summary": () => new Response("", { status: 401 }) })
-  expect(await usageOf(WorkBuddyAuthPlugin, auth)).toEqual({ signIn: "kept", error: "Unauthorized" })
+  expect(await usageOf(WorkBuddyAuthPlugin, auth)).toEqual({ signIn: "kept",
+    error: "WorkBuddy refused this account's sign-in (401); there is no refresh token to renew it with. Sign in to it again in magpie: Providers → WorkBuddy → this account's Sign in again." })
   serve({ "/billing/meter/get-user-resource-summary": () => new Response(JSON.stringify({ code: 10085, msg: "" }), { status: 403 }) })
   expect(await usageOf(WorkBuddyAuthPlugin, auth)).toEqual({ signIn: "kept", error: "error 10085" })
   serve({ "/billing/meter/get-user-resource-summary": () => new Response(JSON.stringify({ code: 11001, msg: "token expired" })) })
@@ -364,7 +366,7 @@ test("a personal account with no credits isn't given the enterprise's, and its r
     "/billing/meter/get-enterprise-user-usage": () => new Response(PERSONAL_ENT, { status: 400 }),
   })
   const auth = { type: "oauth", access: "a", refresh: "r", expires: later(), uid: "u" }
-  expect(await usageOf(WorkBuddyAuthPlugin, auth)).toEqual({ signIn: "kept", plan: "Free", windows: [] })
+  expect(await usageOf(WorkBuddyAuthPlugin, auth)).toEqual({ signIn: "kept", plan: "Free plan", windows: [] })
 })
 
 test("a personal account with credits never asks the enterprise meter", async () => {
@@ -402,7 +404,7 @@ test("credits used up don't count the free models (plugins#138, hheei)", async (
   for (const plugin of [WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin]) {
     serve({ "/billing/meter/get-user-resource-summary": () => ok(SPENT), "/v3/config": FREE_CFG })
     const auth = { type: "oauth", access: "a", refresh: "r", expires: later(), uid: "u", domain: "" }
-    expect(await usageOf(plugin, auth)).toEqual({ signIn: "kept", plan: "Free", windows: [{
+    expect(await usageOf(plugin, auth)).toEqual({ signIn: "kept", plan: "Free plan", windows: [{
       name: "Credits", used: 100, display: "560 / 560", amount: 560, limit: 560, unit: "credits", notModels: ["deepseek-v4.1-flash"] }] })
   }
 })

@@ -1,9 +1,10 @@
 import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
 import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // What a failure means for the sign-in, as magpie's built-in WorkBuddy
-// account had it: WorkBuddy's own 401 was passed on and no WorkBuddy
-// account was ever marked lapsed, so every refusal says X-Magpie-Sign-In:
-// kept; a token that couldn't be renewed fails in wbFresh's words.
+// account had it: every refusal but a 401 says X-Magpie-Sign-In: kept; a
+// token that couldn't be renewed fails in wbFresh's words. A 401 is
+// unauthorized.test.ts's: renewed once, and marked only on WorkBuddy's
+// word that the sign-in is gone.
 import { afterEach, expect, test } from "bun:test"
 import { WorkBuddyAIAuthPlugin, _internal } from "./index.ts"
 
@@ -19,11 +20,15 @@ const ask = async (reply) => {
   return chatFetch(opts)("https://www.workbuddy.ai/v2/chat/completions", { method: "POST", body: '{"messages":[]}' })
 }
 
-test("WorkBuddy's 401 goes on as it came, the account kept", async () => {
+// this fake answers the refresh with the same 401: the refresh token is
+// turned away too, which is WorkBuddy's word that the sign-in is gone
+test("WorkBuddy's 401 with its refresh refused too says to sign in again, the account marked", async () => {
   const res = await ask(() => new Response('{"code":401,"msg":"token invalid"}', { status: 401 }))
   expect(res.status).toBe(401)
-  expect(res.headers.get("X-Magpie-Sign-In")).toBe("kept")
-  expect(await res.text()).toBe('{"code":401,"msg":"token invalid"}')
+  expect(res.headers.get("X-Magpie-Sign-In")).toBe("expired")
+  const { error } = await res.json()
+  expect(error.message).toContain("WorkBuddy AI refused this account's sign-in (401); it refused the refresh token too (token invalid)")
+  expect(error.message).toContain("Sign in to it again in magpie")
 })
 
 test("the channel refusal keeps the account too", async () => {

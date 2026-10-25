@@ -87,7 +87,8 @@ test("a refused sign-in on a chat past 2 MiB says the 401, not ECONNRESET", asyn
   expect(res.headers.get("X-Magpie-Sign-In")).toBe("kept")
   const { error } = await res.json()
   expect(error.message).toContain("refused this account's sign-in (401)")
-  expect(error.message).toContain("Sign in to WorkBuddy AI again")
+  expect(error.message).toContain("which is why it read as ECONNRESET")
+  expect(error.message).toContain("Sign in to it again in magpie")
   expect(meterAsked).toBe(1)
 })
 
@@ -95,7 +96,7 @@ test("the China build's front door is read the same way", async () => {
   meterAsked = 0
   const res = await chat("refused", EDGE_READS + 100_000, WorkBuddyAuthPlugin, "https://copilot.tencent.com")
   expect(res.status).toBe(401)
-  expect((await res.json()).error.message).toContain("Sign in to WorkBuddy again")
+  expect((await res.json()).error.message).toContain("Providers → WorkBuddy →")
   expect(meterAsked).toBe(1)
 })
 
@@ -103,7 +104,8 @@ test("a refused sign-in on a short chat is the front door's own 401, nothing els
   meterAsked = 0
   const res = await chat("refused", 1000)
   expect(res.status).toBe(401)
-  expect(await res.text()).toContain("401 Authorization Required")
+  // with no refresh token to renew it with, said so (unauthorized.test.ts)
+  expect((await res.json()).error.message).toContain("there is no refresh token to renew it with")
   expect(meterAsked).toBe(0)
 })
 
