@@ -96,21 +96,29 @@ test("chatHeaders puts on the desktop client's own marks", () => {
   expect(h.get("x-stainless-arch")).toBe(process.arch)
 })
 
-test("chatHeaders opens one trace a request, spelled the client's three ways", () => {
-  const h = new Headers()
-  chatHeaders(h)
-  const traceparent = h.get("traceparent") ?? ""
+test("attend opens one trace a turn, a span each request, spelled the client's three ways", () => {
+  const chat = (content: string) => JSON.stringify({ model: "glm-5.3", messages: [{ role: "user", content }, { role: "assistant", content: "hi" }, { role: "user", content: "go on" }] })
+  const first = new Headers()
+  attend(first, chat("hello"), "")
+  const traceparent = first.get("traceparent") ?? ""
   expect(traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/)
-  const trace = h.get("X-B3-TraceId") ?? ""
-  const span = h.get("X-B3-SpanId") ?? ""
-  const parent = h.get("X-B3-ParentSpanId") ?? ""
+  const trace = first.get("X-B3-TraceId") ?? ""
+  const span = first.get("X-B3-SpanId") ?? ""
+  const parent = first.get("X-B3-ParentSpanId") ?? ""
   expect(traceparent).toBe(`00-${trace}-${span}-01`)
-  expect(h.get("b3")).toBe(`${trace}-${span}-1-${parent}`)
-  expect(h.get("X-B3-Sampled")).toBe("1")
-  expect(h.get("X-Trace-ID")).toBe(trace)
-  const again = new Headers()
-  chatHeaders(again)
-  expect(again.get("X-B3-TraceId")).not.toBe(trace)
+  expect(first.get("b3")).toBe(`${trace}-${span}-1-${parent}`)
+  expect(first.get("X-B3-Sampled")).toBe("1")
+  expect(first.get("X-Trace-ID")).toBe(trace)
+  // the turn's later steps keep the trace and its parent, take a span each
+  const step = new Headers()
+  attend(step, chat("hello"), "")
+  expect(step.get("X-B3-TraceId")).toBe(trace)
+  expect(step.get("X-B3-ParentSpanId")).toBe(parent)
+  expect(step.get("X-B3-SpanId")).not.toBe(span)
+  // another send opens another trace
+  const next = new Headers()
+  attend(next, chat("bye"), "")
+  expect(next.get("X-B3-TraceId")).not.toBe(trace)
 })
 
 test("a chat goes out with the whole of the client's headers", async () => {
