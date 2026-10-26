@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import type { Account, Authorization, Client, GetAuth, LiveModel, MagpiePlugin, ModelSeed, ProviderInfo, UsageWindow, WireRecord, Site } from "./types.ts"
+import type { Account, Authorization, Checkin, Client, GetAuth, LiveModel, MagpiePlugin, ModelSeed, ProviderInfo, UsageWindow, WireRecord, Site } from "./types.ts"
 
 const APP_VERSION = "2.0.0" // the version WorkBuddy's sign-in page is opened with
 const UA_VERSION = "5.8.3" // WorkBuddy/<this> is the User-Agent the API takes, when the desktop app's own version can't be read
@@ -187,7 +187,7 @@ function nativeOf(site: Site | undefined, model: unknown): boolean {
 }
 
 // Errors may come from fetch, the vendor, or the host's SDK.
-function errorDetails(error: unknown): { name?: string; message?: string; said?: string; bare?: boolean; status?: number; invalidToken?: boolean } {
+function errorDetails(error: unknown): { name?: string; message?: string; said?: string; bare?: boolean; status?: number; code?: number; invalidToken?: boolean } {
   return error !== null && typeof error === "object" ? error : {}
 }
 
@@ -1682,14 +1682,15 @@ async function meter(site: Site, a: Account, path: string, body: unknown = {}): 
   } catch {}
   const code = Number.parseInt(env.code, 10) || 0
   if (!res.ok) {
-    // the status and whether the token itself was refused go with it, for
-    // usage's one renewal on a 401 (reissued)
-    const said = { status: res.status, invalidToken: invalidToken(res) }
+    // the status, the internal code and whether the token itself was
+    // refused go with it, for usage's one renewal on a 401 (reissued) and
+    // the check-in's own answers (1001, 1002, 1003)
+    const said = { status: res.status, code, invalidToken: invalidToken(res) }
     if (code) throw Object.assign(new Error(env.msg || `error ${code}`), said)
     if (env.msg) throw Object.assign(new Error(env.msg), said)
     throw Object.assign(new Error(statusText(res.status)), said)
   }
-  if (code) throw new Error(env.msg || `error ${code}`)
+  if (code) throw Object.assign(new Error(env.msg || `error ${code}`), { code })
   return env.data ?? null
 }
 
@@ -2024,6 +2025,102 @@ async function liveModels(site: Site, a: Account): Promise<LiveModel[]> {
 
 // ---- the plugins --------------------------------------------------------------
 
+// ---- the daily check-in -------------------------------------------------------
+
+// WorkBuddy's check-in answers, the codes its refusals carry: today's is in
+// already (1001), the account can't take part (1002), the event is over
+// (1003). Measured 2026-10-26 on copilot.tencent.com: a claim made already
+// answers 400 with {"code":10001,"msg":"今天已签到，请明天再来"}. Magpie's
+// built-in reads these codes as whole numbers (wbCheckinAlready and its
+// neighbours), so only these are taken, not 10001 (WorkBuddy AI's claim with
+// no event running: "签到活动未开启或已过期").
+const CHECKIN_ALREADY = 1001
+const CHECKIN_INELIGIBLE = 1002
+const CHECKIN_ENDED = 1003
+
+// CheckinStatus is the event as an account sees it, the fields of
+// /v2/billing/meter/checkin-activity-status this hook reads.
+interface CheckinStatus extends WireRecord {
+  active?: boolean
+  today_checked_in?: boolean
+  streak_days?: number
+  today_credit?: number
+}
+
+const STATUS_PATH = "/v2/billing/meter/checkin-activity-status"
+const CLAIM_PATH = "/v2/billing/meter/daily-checkin"
+
+// happened says whether an answer carries a check-in event: the event's own
+// key is there, whatever it says. An answer without it says nothing of the
+// day, so it is no answer, not "no event running".
+const happened = (v: unknown): v is CheckinStatus => v !== null && typeof v === "object" && typeof (v as CheckinStatus).active === "boolean"
+
+// count is a number an answer gave, 0 when it gave none.
+const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, v) : 0)
+
+// checkinOf checks a in for the day as WorkBuddy's desktop app does: the
+// event's status first, and a claim only while it runs and today's isn't in.
+// A 401 is told apart from every other failure (checkinUnauthorized).
+//
+// Measured 2026-10-26: both paths answer a plugin's browser sign-in as they
+// answer the app, its X-Device-Token not needed — the China build's status
+// gave the streak magpie's own file already had, and the international
+// build's said active false. So an answer stands as given. The "own-app" a
+// built-in returns when its check-in is refused while its credits read is
+// reachable only through magpie's own fetch, not from here.
+async function checkinOf(site: Site, a: Account): Promise<Checkin> {
+  let st: WireRecord | null
+  try {
+    st = await meter(site, a, STATUS_PATH)
+  } catch (e) {
+    return await checkinUnauthorized(site, a, e)
+  }
+  if (!happened(st)) return { outcome: "failed", message: `${site.name} answered the check-in status with no event in it` }
+  if (!st.active) return { outcome: "inactive" }
+  if (st.today_checked_in) return { outcome: "done", credit: count(st.today_credit), streak: Math.round(count(st.streak_days)) }
+  let got: WireRecord | null
+  try {
+    got = await meter(site, a, CLAIM_PATH)
+  } catch (e) {
+    const r = await checkinUnauthorized(site, a, e)
+    // the status said how many days in a row the claim makes
+    if (r.outcome === "done") r.streak = Math.round(count(st.streak_days))
+    return r
+  }
+  if (!got) return { outcome: "claimed" }
+  return {
+    outcome: "claimed",
+    credit: count(got.credit),
+    streak: Math.round(count(got.streak_days)),
+    ...(typeof got.message === "string" && got.message ? { message: got.message } : {}),
+  }
+}
+
+// checkinUnauthorized is what a refused status or claim comes to: one of the
+// event's answers for the day, else a failure magpie tries again later.
+// The 401 is looked at first, as magpie's built-in does, so a sign-in refused
+// through a plugin's fetch says to sign in again rather than showing
+// WorkBuddy's HTML page.
+async function checkinUnauthorized(site: Site, a: Account, e: unknown): Promise<Checkin> {
+  const d = errorDetails(e)
+  if (d.status === 401) {
+    // WorkBuddy's front door answers a token it refuses with a bare 401 (an
+    // HTML page). A desktop sign-in has no refresh token here to spend (the
+    // app's file is read again instead), and renewal is magpie's own
+    // question, not a hook's; so it says to sign in again, not "Unauthorized"
+    return { outcome: "failed", message: "WorkBuddy refused this account's sign-in (401 Unauthorized); sign in to it again" }
+  }
+  switch (d.code) {
+    case CHECKIN_ALREADY:
+      return { outcome: "done" }
+    case CHECKIN_INELIGIBLE:
+      return { outcome: "ineligible", ...(d.message ? { message: d.message } : {}) }
+    case CHECKIN_ENDED:
+      return { outcome: "inactive", ...(d.message ? { message: d.message } : {}) }
+  }
+  return { outcome: "failed", message: d.message ?? String(e) }
+}
+
 // AFTER_TOOLS_REFUSED is WorkBuddy's 400 code 11153, "the conversation must
 // end with a user message", which WorkBuddy AI's gemini-3.8-flash answers to a
 // chat whose tool results are followed by the user's message (#113): Claude
@@ -2287,6 +2384,21 @@ function makePlugin(site: Site): MagpiePlugin {
           return { error: errorDetails(e).message ?? String(e), signIn: "kept" }
         }
       },
+      // magpie presses the daily check-in (签到) through this hook: each
+      // signed-in account once a Beijing day, and again later that day after
+      // a failure. It refreshes the sign-in itself, as magpie's own check-in
+      // does, so the whole check-in is a plain function of the account. A
+      // hook that throws is a failure to magpie; this one answers instead, so
+      // the reason shows on the card.
+      async checkin(getAuth) {
+        try {
+          const auth = await getAuth()
+          if (auth?.type !== "oauth" || !(auth.access || auth.source)) return { outcome: "failed", message: `${site.name} isn't signed in` }
+          return await checkinOf(site, await current(site, client, auth))
+        } catch (e) {
+          return { outcome: "failed", message: errorDetails(e).message ?? String(e) }
+        }
+      },
       methods: [
         {
           type: "oauth",
@@ -2405,4 +2517,4 @@ export const WorkBuddyAuthPlugin = makePlugin(SITES.workbuddy)
 export const WorkBuddyAIAuthPlugin = makePlugin(SITES["workbuddy-ai"])
 
 // for tests
-export const _internal = { typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, chatHeaders, uuid7, idFor, desktopVersion, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
+export const _internal = { typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, chatHeaders, uuid7, idFor, desktopVersion, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, answeredBefore, nativeOf, modelOf, configModels, checkinOf, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }

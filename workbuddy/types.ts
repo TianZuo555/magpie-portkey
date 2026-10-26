@@ -63,6 +63,18 @@ export interface Usage {
   error?: string
   signIn: "kept" | "renewed" | "expired"
 }
+// Checkin is what came of the account's daily check-in, as magpie's
+// auth.checkin hook answers it: "claimed" now, "done" already in today,
+// "ineligible" and "inactive" the event says no, "captcha" the vendor asks
+// one (never solved), "failed" no answer (tried again later). "own-app" is
+// the built-in WorkBuddy's own answer, not a hook's: its check-in wants the
+// desktop app's device token, so it is left to magpie.
+export interface Checkin {
+  outcome: "claimed" | "done" | "ineligible" | "inactive" | "captcha" | "failed" | "own-app"
+  credit?: number
+  streak?: number
+  message?: string
+}
 export type GetAuth = () => Promise<Account | null | undefined>
 export interface AuthResult extends Account {
   type: "success" | "failed"
@@ -96,6 +108,9 @@ export interface PluginHooks {
     refresh: (auth: Account | null | undefined, provider?: string) => Promise<Partial<Account> | undefined>
     loader: (getAuth: GetAuth) => Promise<LoaderOptions>
     usage: (getAuth: GetAuth) => Promise<Usage>
+    // magpie presses the daily check-in through this hook; OpenCode
+    // ignores it
+    checkin?: (getAuth: GetAuth, provider?: ProviderInfo) => Promise<Checkin>
     methods: { type: "oauth"; label: string; authorize: () => Promise<Authorization> }[]
   }
 }

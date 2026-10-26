@@ -164,6 +164,44 @@ some hours of the day (Hy4 preview, free 23:00–8:00) is given as its full
 price, never as free: magpie keeps the list until it asks again, so a list
 asked for at night would say "free" all day (#121).
 
+## Daily check-in (签到)
+
+In magpie, the plugin presses WorkBuddy's daily check-in for each signed-in
+account: `auth.checkin`, which magpie runs once a Beijing day while
+**Settings → Usage → WorkBuddy → Daily check-in** is on, again 30 minutes
+later after a failure, and at once from *Check in now*, `magpie accounts
+checkin` and `c` on the TUI's Usage page. OpenCode ignores the hook.
+
+It asks the event first (`/v2/billing/meter/checkin-activity-status`), and
+claims (`/v2/billing/meter/daily-checkin`) only while the event runs and
+today's isn't in. Both requests go with the billing API's own headers
+(`User-Agent: axios/1.16.1` and the account's), as the app's do. The answer
+is one of:
+
+| Outcome | When |
+|---|---|
+| `claimed` | claimed now, with `credit` and `streak` |
+| `done` | today's was in already, with today's `credit` and `streak` |
+| `inactive` | no event running, or it ended (code 1003) |
+| `ineligible` | the account can't take part (code 1002) |
+| `failed` | no answer: offline, a 5xx, a 401, or an unknown code |
+
+Code 1001 ("今天已签到，请明天再来", HTTP 400) is `done`, and carries the
+streak the status gave. A 401 from WorkBuddy's front door (a bare HTML
+page) says to sign in again, not "Unauthorized": it is `failed`, so
+magpie asks again later, and the card shows why. An answer for the day is
+kept by magpie in `workbuddy-checkin.json`; a failure is retried.
+
+A plugin's check-in carries no `X-Device-Token`, and needs none: measured
+on 2026-10-26, both builds answered it as they answer the app. The China
+build's status gave the streak magpie's own file already held; the
+international build's said `active: false`. So `own-app`, which magpie's
+built-in returns when its check-in is refused while its credits read, is
+not one this hook answers.
+
+WorkBuddy AI has no check-in event: its status says `active: false`, and
+its claim answers 400 code 10001 ("签到活动未开启或已过期").
+
 ## Credits in magpie
 
 magpie's usage card shows the account's credits from the resource summary.
@@ -215,7 +253,6 @@ entry. An already signed-in browser can simply renew another saved account.
 ## Not here
 
 magpie's built-in WorkBuddy does more than this package:
-- the daily check-in;
 - the credits meter (`/billing/meter/get-user-resource-summary`);
 - several accounts under one provider.
 
