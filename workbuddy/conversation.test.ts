@@ -118,7 +118,7 @@ test("WorkBuddy AI takes the ids too, with its client's headers", async () => {
   expect(turn(ai)).toMatch(UUID7)
   expect(conv(ai)).toMatch(UUID7)
   expect(ai.get("x-ide-name")).toBe("WorkBuddy")
-  expect(ai.get("user-agent")).toBe(`WorkBuddy/${desktopVersion(SITES["workbuddy-ai"])} WorkBuddy/${desktopVersion(SITES["workbuddy-ai"])} CLI/2.161.0`)
+  expect(ai.get("user-agent")).toBe(`WorkBuddy/${desktopVersion(SITES["workbuddy-ai"])} WorkBuddy/${desktopVersion(SITES["workbuddy-ai"])} CLI/2.165.0`)
 })
 
 test("both builds carry what the usage list shows as the client (使用端)", async () => {

@@ -4,6 +4,7 @@
 // on the SDK's marks, the trace, the ACP connection, and the marks that say
 // the request is the client's own. Nothing here leaves the machine.
 import { afterEach, expect, test } from "bun:test"
+import { gunzipSync } from "node:zlib"
 import { setFetch, chatFetch } from "./test-helpers.ts"
 import type { MagpiePlugin } from "./types.ts"
 import { WorkBuddyAuthPlugin, _internal } from "./index.ts"
@@ -16,10 +17,12 @@ const UUID7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{
 
 // ask sends a chat as magpie's host does and reads back the headers the
 // request went to WorkBuddy with.
+let lastBody: unknown
 async function ask(body: unknown, { session = "" }: { session?: string } = {}) {
   const sent: Headers[] = []
   setFetch(async (_url, init) => {
     sent.push(new Headers(init?.headers))
+    lastBody = init?.body
     return new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
   })
   const hooks = await WorkBuddyAuthPlugin({ client: {} })
@@ -58,6 +61,7 @@ test("attend gives a chat the client's id headers", () => {
   expect(h.get("X-Conversation-Request-ID")).toMatch(UUID7)
   expect(h.get("X-Root-Request-ID")).toBe(h.get("X-Conversation-Request-ID"))
   expect(h.get("X-Conversation-ID")).toMatch(UUID7)
+  expect(h.get("baggage")).toBe(`buddyId=,buddyName=,codebuddy.session_id=${h.get("X-Conversation-ID")},codebuddy.conversation_request_id=${h.get("X-Conversation-Request-ID")}`)
 })
 
 test("a later step of one send keeps its ids, a new message takes another", () => {
@@ -78,7 +82,11 @@ test("chatHeaders puts on the desktop client's own marks", () => {
   chatHeaders(h)
   expect(h.get("Accept")).toBe("application/json")
   expect(h.get("X-Agent-Type")).toBe("main")
-  expect(h.get("X-Private-Data")).toBe("true")
+  expect(h.get("X-Agent-Purpose")).toBe("conversation")
+  expect(h.get("X-Agent-Intent")).toBe("craft")
+  expect(h.get("X-Agent-Runtime")).toBe("local-agent")
+  expect(h.get("X-Private-Data")).toBe("false")
+  expect(h.get("X-Requested-With")).toBe("XMLHttpRequest")
   expect(h.get("x-codebuddy-request")).toBe("1")
   expect(h.get("acp-connection-id")).toMatch(UUID7)
   for (const k of ["x-stainless-lang", "x-stainless-package-version", "x-stainless-os", "x-stainless-arch", "x-stainless-runtime", "x-stainless-runtime-version", "x-stainless-retry-count"]) {
@@ -108,15 +116,24 @@ test("chatHeaders opens one trace a request, spelled the client's three ways", (
 test("a chat goes out with the whole of the client's headers", async () => {
   const h = await ask({ model: "glm-5.3", stream: true, messages: [{ role: "user", content: "hello" }] })
   const v = desktopVersion(SITES.workbuddy)
-  expect(h.get("User-Agent")).toBe(`WorkBuddy/${v} WorkBuddy/${v} CLI/2.161.0`)
+  expect(h.get("User-Agent")).toBe(`WorkBuddy/${v} WorkBuddy/${v} CLI/2.165.0`)
   expect(h.get("X-IDE-Version")).toBe(v)
   expect(h.get("X-Agent-Type")).toBe("main")
-  expect(h.get("X-Private-Data")).toBe("true")
+  expect(h.get("X-Agent-Purpose")).toBe("conversation")
+  expect(h.get("X-Agent-Runtime")).toBe("local-agent")
+  expect(h.get("X-Private-Data")).toBe("false")
+  expect(h.get("X-Requested-With")).toBe("XMLHttpRequest")
   expect(h.get("x-codebuddy-request")).toBe("1")
   expect(h.get("Accept")).toBe("application/json")
   expect(h.get("traceparent")).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/)
   expect(h.get("X-Conversation-Message-ID")).toMatch(UUID7)
   expect(h.get("X-Root-Request-ID")).toBe(h.get("X-Conversation-Request-ID"))
+  expect(h.get("baggage")).toContain("codebuddy.session_id=")
+  expect(h.get("Content-Encoding")).toBe("gzip")
+  // the body itself is gzip bytes that gunzip back to the chat
+  expect(lastBody instanceof Uint8Array).toBe(true)
+  const unzipped = gunzipSync(lastBody as Uint8Array).toString()
+  expect(JSON.parse(unzipped).model).toBe("glm-5.3")
   const again = await ask({ model: "glm-5.3", stream: true, messages: [{ role: "user", content: "again" }] })
   expect(again.get("acp-connection-id")).toBe(h.get("acp-connection-id"))
   expect(again.get("X-Conversation-ID")).not.toBe(h.get("X-Conversation-ID"))

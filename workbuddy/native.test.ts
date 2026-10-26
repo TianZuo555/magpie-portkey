@@ -14,9 +14,13 @@
 // there (median 30850 at max against 5748 at low, 4 runs each).
 import { afterAll, afterEach, expect, test } from "bun:test"
 import { realpathSync } from "node:fs"
+import { gunzipSync } from "node:zlib"
 import { homedir, tmpdir } from "node:os"
 import { setFetch, chatFetch } from "./test-helpers.ts"
 import { WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } from "./index.ts"
+
+// a chat's body goes out gzipped; read either back to text
+const text = (b: unknown) => (typeof b === "string" ? b : gunzipSync(b as Uint8Array).toString())
 
 // the loader tests sign in: no real sign-in may be read
 if (![tmpdir(), realpathSync(tmpdir())].some((t) => homedir().startsWith(t))) throw new Error("run with HOME=$(mktemp -d) bun test")
@@ -292,7 +296,7 @@ test("a Messages request goes to /v1/messages byte for byte as sent, with WorkBu
   expect(c.url).toBe(MSGS)
   // nothing of the chat route's rewrites: no default system message, no
   // max_tokens respelling, no tool renaming, no rewording
-  expect(c.body).toBe(CC_BODY)
+  expect(text(c.body)).toBe(CC_BODY)
   expect(c.headers.get("authorization")).toBe("Bearer old")
   expect(c.headers.get("x-api-key")).toBeNull()
   expect(c.headers.get("user-agent")).toMatch(/^WorkBuddy\//)
@@ -313,7 +317,7 @@ test("a Messages body with unsigned thinking goes without it, the rest as sent",
     ],
   })
   await send(body)
-  const sent = JSON.parse(calls[0].body as string)
+  const sent = JSON.parse(text(calls[0].body))
   expect(sent.messages[1].content).toEqual([{ type: "text", text: "hello" }])
   expect(sent.messages[0]).toEqual({ role: "user", content: "hi" })
 })
@@ -326,7 +330,7 @@ test("a 401 on Messages is renewed once and sent again, the body as it was", asy
   expect(asked.length).toBe(2)
   expect(asked[0].headers.get("authorization")).toBe("Bearer old")
   expect(asked[1].headers.get("authorization")).toBe("Bearer new")
-  expect(asked[1].body).toBe(CC_BODY)
+  expect(text(asked[1].body)).toBe(CC_BODY)
   expect(calls.filter((c) => c.path === REFRESH).length).toBe(1)
   expect(sets.some((x) => x?.body?.access === "new")).toBe(true)
   expect(res.headers.get("X-Magpie-Sign-In")).toBe("renewed")
@@ -357,7 +361,7 @@ test("a chat request still goes through the chat route's rewrites", async () => 
   const opts = await hooks.auth.loader(async () => signedIn())
   const body = JSON.stringify({ model: "glm-5.3", max_completion_tokens: 4096, stream: true, messages: [{ role: "user", content: "hi" }] })
   await chatFetch(opts)("https://copilot.tencent.com/v2/chat/completions", { method: "POST", body })
-  const sent = JSON.parse(calls[0].body as string)
+  const sent = JSON.parse(text(calls[0].body))
   expect(sent.max_tokens).toBe(4096)
   expect(sent.max_completion_tokens).toBeUndefined()
   expect(sent.messages[0].role).toBe("system")
@@ -448,7 +452,7 @@ test("a signature WorkBuddy didn't make is refused once, then the request goes w
     const u = new URL(String(url))
     if (u.pathname.endsWith("/token/refresh")) return ok(RENEWED)
     n++
-    seen.push(JSON.parse(init.body as string))
+    seen.push(JSON.parse(text(init.body)))
     // the first try is refused, the retry (without thinking) answers
     return n === 1 ? new Response(REFUSAL, { status: 500 }) : new Response(SSE, { headers: { "content-type": "text/event-stream" } })
   })

@@ -84,7 +84,7 @@ test("a 401 before the token's time is renewed, saved and sent once more, which 
   expect(res.headers.get("X-Magpie-Sign-In")).toBe("renewed")
   const chats = of(calls, "/v2/chat/completions")
   expect(chats.map((c) => c.headers.get("authorization"))).toEqual(["Bearer old", "Bearer new"])
-  expect(chats[1].body).toBe(chats[0].body) // the same request, again
+  expect(Buffer.from(chats[1].body as Uint8Array).equals(chats[0].body as Uint8Array)).toBe(true) // the same request, again
   const r = of(calls, REFRESH)
   expect(r.length).toBe(1)
   expect(r[0].headers.get("x-refresh-token")).toBe("r1")

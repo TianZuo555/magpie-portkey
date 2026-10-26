@@ -1,4 +1,5 @@
 import { expect } from "bun:test"
+import { gunzipSync } from "node:zlib"
 import type { LoaderOptions, WireRecord } from "./types.ts"
 
 export type FetchMock = (input: string | URL | Request, init: RequestInit) => Promise<Response>
@@ -9,6 +10,8 @@ export function setFetch(mock: FetchMock): void {
   ) as typeof fetch
 }
 export function parse(body: unknown): WireRecord {
+  // a chat's body goes to WorkBuddy gzipped; read either back
+  if (body instanceof Uint8Array) body = gunzipSync(body).toString()
   expect(typeof body).toBe("string")
   return JSON.parse(body as string)
 }

@@ -7,6 +7,7 @@ import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // socket, so Bun's fetch meets the same reset it met on www.workbuddy.ai.
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import net from "node:net"
+import { randomBytes } from "node:crypto"
 import { WorkBuddyAIAuthPlugin, WorkBuddyAuthPlugin, _internal } from "./index.ts"
 
 const { EDGE_READS } = _internal
@@ -58,8 +59,10 @@ beforeAll(async () => {
 
 afterAll(() => server.close())
 
-// chat is a loader fetch of a body of about size bytes, signed in as token,
-// with the site (WorkBuddy AI's, else the China build's) served by the fake
+// chat is a loader fetch of a body of about size bytes on the wire, signed
+// in as token, with the site (WorkBuddy AI's, else the China build's) served
+// by the fake. The body is random hex asked twice over, for gzip composes
+// hex down to about half — the wire stays past the edge the fake reads.
 async function chat(token, size, plugin = WorkBuddyAIAuthPlugin, site = "https://www.workbuddy.ai") {
   const realFetch = globalThis.fetch
   setFetch((u, init) => realFetch(String(u instanceof Request ? u.url : u).replace(site, origin), init))
@@ -71,7 +74,7 @@ async function chat(token, size, plugin = WorkBuddyAIAuthPlugin, site = "https:/
       stream: true,
       messages: [
         { role: "system", content: "You are helpful." },
-        { role: "user", content: "x".repeat(size) },
+        { role: "user", content: randomBytes(size).toString("hex") },
       ],
     })
     return await chatFetch(loader)(site + "/v2/chat/completions", { method: "POST", body })

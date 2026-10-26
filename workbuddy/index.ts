@@ -10,6 +10,7 @@
 
 import { createHash, randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
+import { gzipSync } from "node:zlib"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -17,7 +18,7 @@ import type { Account, Authorization, Checkin, Client, GetAuth, LiveModel, Magpi
 
 const APP_VERSION = "2.0.0" // the version WorkBuddy's sign-in page is opened with
 const UA_VERSION = "5.8.3" // WorkBuddy/<this> is the User-Agent the API takes, when the desktop app's own version can't be read
-const CLI_VERSION = "2.161.0" // the CLI the desktop app runs, in its User-Agents beside the app's own version
+const CLI_VERSION = "2.165.0" // the CLI the desktop app runs, in its User-Agents beside the app's own version (measured on 5.9.2)
 const POLL_MS = 1000
 const SIGN_IN_MS = 5 * 60 * 1000
 const EARLY_MS = 60 * 1000 // a token this close to its end is refreshed before a request
@@ -669,6 +670,11 @@ function attend(headers: Headers, body: unknown, session: string) {
   }
   if (!headers.has("X-Root-Request-ID")) headers.set("X-Root-Request-ID", headers.get("X-Conversation-Request-ID") ?? "")
   if (conv && !headers.has("X-Conversation-ID")) headers.set("X-Conversation-ID", idFor("conversation", conv))
+  // the W3C baggage the desktop's trace carries: empty buddy marks and the
+  // chat's own two ids, spelled the client's way
+  const sessionId = headers.get("X-Conversation-ID") ?? ""
+  const requestId = headers.get("X-Conversation-Request-ID") ?? ""
+  headers.set("baggage", `buddyId=,buddyName=,codebuddy.session_id=${sessionId},codebuddy.conversation_request_id=${requestId}`)
 }
 
 // ACP_CONNECTION is the connection this client chats under: one id a run,
@@ -680,11 +686,15 @@ const ACP_CONNECTION = uuid7()
 // versions are the ones of the SDK and the node the desktop bundles, not
 // magpie's), the trace its instrumentation opens for each request, the ACP
 // connection, and the marks that say the request is its own. Measured on
-// the 5.8.3 desktop's chats; both builds are one client codebase.
+// the 5.9.2 desktop's chats; both builds are one client codebase.
 function chatHeaders(headers: Headers) {
   headers.set("Accept", "application/json")
   headers.set("X-Agent-Type", "main")
-  headers.set("X-Private-Data", "true")
+  headers.set("X-Agent-Purpose", "conversation")
+  headers.set("X-Agent-Intent", "craft")
+  headers.set("X-Agent-Runtime", "local-agent")
+  headers.set("X-Private-Data", "false")
+  headers.set("X-Requested-With", "XMLHttpRequest")
   headers.set("x-codebuddy-request", "1")
   headers.set("acp-connection-id", ACP_CONNECTION)
   headers.set("x-stainless-lang", "js")
@@ -2240,8 +2250,15 @@ function makePlugin(site: Site): MagpiePlugin {
               body = withoutUnsigned(body) as typeof body
             }
             attend(headers, body, session)
-            const post = (b: BodyInit | null | undefined) =>
-              fetch(req ? req.url : input, { ...init, method: init?.method ?? req?.method, headers, body: b }).catch((e) => unanswered(site, a, b, e, init?.signal))
+            // the desktop sends a chat's body gzipped, whatever its size —
+            // measured on its 5.9.2 chats, from a 1.2 kB one to a 46 kB one
+            const post = (b: BodyInit | null | undefined) => {
+              if (typeof b === "string") {
+                headers.set("Content-Encoding", "gzip")
+                b = gzipSync(b)
+              }
+              return fetch(req ? req.url : input, { ...init, method: init?.method ?? req?.method, headers, body: b }).catch((e) => unanswered(site, a, b, e, init?.signal))
+            }
             // a 401 is answered once, on whichever try meets it: by a
             // sign-in with another access token (reissued), the request
             // sent once more with it, never again after that; else, or
