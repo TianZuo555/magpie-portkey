@@ -4,6 +4,9 @@
 // on the SDK's marks, the trace, the ACP connection, and the marks that say
 // the request is the client's own. Nothing here leaves the machine.
 import { afterEach, expect, test } from "bun:test"
+import { mkdirSync, writeFileSync, utimesSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { gunzipSync } from "node:zlib"
 import { setFetch, chatFetch } from "./test-helpers.ts"
 import type { MagpiePlugin } from "./types.ts"
@@ -132,6 +135,7 @@ test("a chat goes out with the whole of the client's headers", async () => {
   expect(h.get("X-Private-Data")).toBe("false")
   expect(h.get("X-Requested-With")).toBe("XMLHttpRequest")
   expect(h.get("x-codebuddy-request")).toBe("1")
+  expect(h.get("X-Device-Token")).toBeNull() // no sidecar in the tests' HOME
   expect(h.get("Accept")).toBe("application/json")
   expect(h.get("traceparent")).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/)
   expect(h.get("X-Conversation-Message-ID")).toMatch(UUID7)
@@ -150,4 +154,18 @@ test("a chat goes out with the whole of the client's headers", async () => {
 test("desktopVersion says a version, read or measured", () => {
   expect(desktopVersion(SITES.workbuddy)).toMatch(/^\d+(\.\d+){2}/)
   expect(desktopVersion(SITES["workbuddy-ai"])).toMatch(/^\d+(\.\d+){2}/)
+})
+
+test("a device token the sidecar wrote goes out as the desktop's own, stale or none doesn't", async () => {
+  const file = join(homedir(), ".local", "share", "workbuddy-turing", "token")
+  mkdirSync(join(homedir(), ".local", "share", "workbuddy-turing"), { recursive: true })
+  writeFileSync(file, "v3:AAAAtesttoken123", { mode: 0o600 })
+  let h = await ask({ model: "glm-5.3", stream: true, messages: [{ role: "user", content: "hello" }] })
+  expect(h.get("X-Device-Token")).toBe("v3:AAAAtesttoken123")
+  // stale — written ten minutes ago and more — reads as none
+  const old = new Date(Date.now() - 11 * 60_000)
+  utimesSync(file, old, old)
+  _internal.tokenForget()
+  h = await ask({ model: "glm-5.3", stream: true, messages: [{ role: "user", content: "again" }] })
+  expect(h.get("X-Device-Token")).toBeNull()
 })

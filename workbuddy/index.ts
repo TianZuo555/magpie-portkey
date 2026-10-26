@@ -9,7 +9,7 @@
 // WorkBuddy/<version> is refused (error 10085).
 
 import { createHash, randomBytes } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { gzipSync } from "node:zlib"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -695,6 +695,34 @@ function attend(headers: Headers, body: unknown, session: string) {
 // as the desktop's own connection is.
 const ACP_CONNECTION = uuid7()
 
+// X-Device-Token: the TuringShield device token the desktop's anti-fraud
+// SDK mints, five minutes at a time. The SDK refuses to run outside a real
+// app's main loop (a plain Node or ELECTRON_RUN_AS_NODE process never sees
+// its answer), so the plugin reads the token from a sidecar that runs the
+// app's own SDK in a real Electron loop and writes it here; with no
+// sidecar there is no header, and WorkBuddy's servers serve a chat without
+// it either. A token older than ten minutes is stale, for the sidecar
+// writes a fresh one every 4.5 minutes; a found token is remembered a
+// minute, a missing one is asked for again each time.
+let tokenHeld: { at: number; token: string | null } | null = null
+const deviceTokenFile = () => join(homedir(), ".local", "share", "workbuddy-turing", "token")
+const deviceToken = (): string | null => {
+  const now = Date.now()
+  if (tokenHeld?.token && now - tokenHeld.at < 60_000) return tokenHeld.token
+  let token: string | null = null
+  try {
+    const file = deviceTokenFile()
+    if (now - statSync(file).mtimeMs < 10 * 60_000) {
+      const read = readFileSync(file, "utf8").trim()
+      if (/^v3:AAAA/.test(read)) token = read
+    }
+  } catch {
+    token = null
+  }
+  tokenHeld = { at: now, token }
+  return token
+}
+
 // one trace a turn: the requests of one send — its steps, its retries —
 // share one trace and one parent span, each its own span, as the desktop's
 // own instrumentation makes them (measured on its 5.9.2 chats: a six-step
@@ -724,6 +752,8 @@ function chatHeaders(headers: Headers) {
   headers.set("X-Private-Data", "false")
   headers.set("X-Requested-With", "XMLHttpRequest")
   headers.set("x-codebuddy-request", "1")
+  const token = deviceToken()
+  if (token) headers.set("X-Device-Token", token)
   headers.set("acp-connection-id", ACP_CONNECTION)
   headers.set("x-stainless-lang", "js")
   headers.set("x-stainless-package-version", "6.25.0")
@@ -2552,4 +2582,4 @@ export const WorkBuddyAuthPlugin = makePlugin(SITES.workbuddy)
 export const WorkBuddyAIAuthPlugin = makePlugin(SITES["workbuddy-ai"])
 
 // for tests
-export const _internal = { typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, chatHeaders, uuid7, idFor, desktopVersion, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, answeredBefore, nativeOf, modelOf, configModels, checkinOf, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
+export const _internal = { typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, chatHeaders, uuid7, idFor, desktopVersion, tokenForget: () => (tokenHeld = null), turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, answeredBefore, nativeOf, modelOf, configModels, checkinOf, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
