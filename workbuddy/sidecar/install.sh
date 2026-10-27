@@ -1,24 +1,33 @@
 #!/bin/bash
-# Installs the WorkBuddy Turing device-token sidecar: a small Electron app
-# that runs WorkBuddy's own TuringShield SDK in a real app main loop (it
-# refuses plain Node) and writes the device token for the magpie plugin.
-#   ./install.sh           install (or repair) and start
-#   ./install.sh remove    stop and uninstall (add --purge to drop Electron)
+# Installs the WorkBuddy sidecars for the magpie plugin:
+#   - the Turing device-token sidecar: a small Electron app that runs
+#     WorkBuddy's own TuringShield SDK in a real app main loop (it refuses
+#     plain Node) and writes the device token for the plugin to send
+#   - the bridge: a Node (22.21.1, as the desktop's x-stainless marks say)
+#     that the plugin's requests go out through, so their TLS on the wire
+#     is Node's, not the host runtime's
+#   ./install.sh           install (or repair) both and start them
+#   ./install.sh remove    stop and uninstall both (--purge drops binaries)
 set -euo pipefail
 
 SIDE_DIR="$HOME/.local/share/workbuddy-turing"
 LABEL="com.workbuddy.turing.sidecar"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+BRIDGE_LABEL="com.workbuddy.bridge"
+BRIDGE_PLIST="$HOME/Library/LaunchAgents/$BRIDGE_LABEL.plist"
 ELECTRON_VERSION="33.4.11"   # verified working; any recent one should do
+NODE_VERSION="22.21.1"       # the node the desktop's own marks declare
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 die() { echo "error: $*" >&2; exit 1; }
 
 remove() {
-  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-  rm -f "$PLIST"
-  if [ "${1:-}" = "--purge" ]; then rm -rf "$SIDE_DIR"; else rm -rf "$SIDE_DIR/main.js" "$SIDE_DIR/package.json"; fi
-  echo "removed (token file and Electron kept unless --purge)"
+  UID_="$(id -u)"
+  launchctl bootout "gui/$UID_/$LABEL" 2>/dev/null || true
+  launchctl bootout "gui/$UID_/$BRIDGE_LABEL" 2>/dev/null || true
+  rm -f "$PLIST" "$BRIDGE_PLIST"
+  if [ "${1:-}" = "--purge" ]; then rm -rf "$SIDE_DIR"; else rm -rf "$SIDE_DIR/main.js" "$SIDE_DIR/package.json" "$SIDE_DIR/bridge.js"; fi
+  echo "removed (token file and binaries kept unless --purge)"
   exit 0
 }
 
@@ -57,6 +66,32 @@ if [ ! -x "$SIDE_DIR/Electron.app/Contents/MacOS/Electron" ] || \
   [ -d "$SIDE_DIR/Electron.app/Contents/Frameworks" ] || die "Electron extraction incomplete — run again"
 fi
 
+# the bridge: Node 22, straight from nodejs.org, so nothing else is needed
+if [ "$(command -v "$SIDE_DIR/node/bin/node" >/dev/null 2>&1 && "$SIDE_DIR/node/bin/node" --version || true)" != "v$NODE_VERSION" ]; then
+  echo "downloading Node v$NODE_VERSION (darwin-$ARCH)…"
+  TMP_NODE="$(mktemp -d)"
+  curl -fSL --progress-bar "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-darwin-$ARCH.tar.gz" | tar -xz -C "$TMP_NODE"
+  rm -rf "$SIDE_DIR/node"
+  mv "$TMP_NODE/node-v$NODE_VERSION-darwin-$ARCH" "$SIDE_DIR/node"
+fi
+cp "$SRC_DIR/bridge.js" "$SIDE_DIR/bridge.js"
+
+cat > "$BRIDGE_PLIST" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$BRIDGE_LABEL</string>
+  <key>ProgramArguments</key><array>
+    <string>$SIDE_DIR/node/bin/node</string>
+    <string>$SIDE_DIR/bridge.js</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$SIDE_DIR/bridge.log</string>
+  <key>StandardErrorPath</key><string>$SIDE_DIR/bridge.log</string>
+</dict></plist>
+EOF
+
 cat > "$PLIST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -88,7 +123,16 @@ for i in $(seq 1 30); do
 done
 if [ -s "$SIDE_DIR/token" ]; then
   echo "OK: $(wc -c < "$SIDE_DIR/token" | tr -d ' ')-byte token at $SIDE_DIR/token"
-  echo "The plugin (>= 0.1.38) picks it up on its next chat."
 else
   echo "no token yet — check $SIDE_DIR/sidecar.log (first fetch can take a moment; run again to retry)"
 fi
+for i in $(seq 1 15); do
+  curl -sf -m 1 "http://127.0.0.1:18765/health" >/dev/null 2>&1 && break
+  sleep 1
+done
+if curl -sf -m 1 "http://127.0.0.1:18765/health" >/dev/null 2>&1; then
+  echo "OK: bridge up on 127.0.0.1:18765 — the plugin's chats go out with Node's TLS"
+else
+  echo "bridge not answering — check $SIDE_DIR/bridge.log"
+fi
+echo "The plugin (>= 0.1.39) picks both up on its next chat."
