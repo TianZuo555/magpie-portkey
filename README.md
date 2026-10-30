@@ -94,6 +94,8 @@ The included catalog comes from the original pi integration. Availability, limit
 
 Unsigned thinking from another provider is replayed as text. Incomplete streams and invalid tool JSON become errors. The provider reads system prompts and tools from pi’s current transcript API.
 
+Requests are sent uncompressed. Portkey’s deployed gateway reads the body as plain JSON and does not decompress: a gzip or deflate body answers `400` with `Value null at 'messages'` even at 95 bytes, on both `/model/{id}/converse-stream` and `/v1/messages`. Compressing the request needs the gateway to enable request decompression first. Responses are also sent uncompressed, and `Accept-Encoding: gzip, br` changes nothing.
+
 ## Use in pi
 
 From a local checkout:
