@@ -86,7 +86,7 @@ The included catalog comes from the original pi integration. Availability, limit
 
 - Native Bedrock Converse streaming through `@ai-sdk/amazon-bedrock`.
 - Text, vision, streamed tool arguments and tool results, including image results and failed tools.
-- Reasoning levels, including `xhigh` and `max` where declared; signed and redacted reasoning survives replay.
+- Reasoning levels, including `xhigh` and `max` where declared; signed and redacted reasoning survives replay. Thinking streams with `display: summarized`, so the first token arrives while the model reasons instead of after the whole reasoning pass.
 - Two explicit prompt-cache checkpoints: the system prompt and the final conversation message. Bedrock determines cache eligibility and retention.
 - Input, output, cache-read and cache-write token accounting with the catalog’s prices.
 - Cancellation, request timeouts, payload inspection and response hooks.

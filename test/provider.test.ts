@@ -51,6 +51,7 @@ test("real Bedrock request: authentication, routing, tools, reasoning, caching a
   assert.equal(c.body.toolConfig.tools[0].toolSpec.name, "lookup");
   assert.equal(c.body.inferenceConfig.temperature, undefined); // Bedrock omits sampling while thinking.
   assert.equal(c.body.additionalModelRequestFields.output_config.effort, "max");
+  assert.equal(c.body.additionalModelRequestFields.thinking.display, "summarized"); // Otherwise the first token waits for the whole think.
   assert.equal(c.response.status, 200);
   assert.equal(c.response.headers["x-amzn-requestid"], "test-request");
   assert.ok(c.raw.length > 0);

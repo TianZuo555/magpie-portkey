@@ -311,6 +311,10 @@ function bedrockReasoningOptions(model: Model<Api>, level: SimpleStreamOptions["
     bedrock: {
       reasoningConfig: {
         type: "adaptive" as const,
+        // Bedrock omits thinking unless display asks for it, so a long think
+        // sends nothing until the answer starts: the first token then waits for
+        // the whole reasoning pass. Summarized thinking streams as it happens.
+        display: "summarized" as const,
         maxReasoningEffort: effort as "low" | "medium" | "high" | "xhigh" | "max",
       },
     },
