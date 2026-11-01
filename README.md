@@ -115,6 +115,8 @@ npm install --ignore-scripts
 npm run check
 ```
 
+Type checking uses [`tsrs`](https://www.npmjs.com/package/tsrs), the Rust port of the TypeScript 7 compiler, instead of `tsc`.
+
 Tests use real AWS event-stream frames against the Bedrock SDK to verify authentication, conversion, tools, images, reasoning, cache markers, usage, Unicode chunk boundaries, aborts and failures. No live credentials are used.
 
 For integration coverage:
