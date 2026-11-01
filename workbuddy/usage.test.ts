@@ -1,19 +1,19 @@
-import { setFetch, parse, chatFetch, type Call, type Save } from "./test-helpers.ts"
+import { setFetch, parse, chatFetch, desktopAuthFile, clearDesktopAuth, type Call, type Save } from "./test-helpers.ts"
 import type { Account, Client, MagpiePlugin, WireRecord } from "./types.ts"
 // auth.usage tells what magpie's built-in WorkBuddy usage told for the same
 // answers (internal/provider/workbuddy_test.go, workbuddy_ai_test.go).
 import { test, expect, afterAll, beforeAll, afterEach } from "bun:test"
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs"
+import { writeFileSync, readFileSync, rmSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { realpathSync } from "node:fs"
-import { join } from "node:path"
 
-let WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal, home
+let WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal
 beforeAll(async () => {
   // Bun reads HOME once, at start: run as HOME=$(mktemp -d) bun test, so
   // no real sign-in is ever read
   if (![tmpdir(), realpathSync(tmpdir())].some((t) => homedir().startsWith(t))) throw new Error("run with HOME=$(mktemp -d) bun test")
-  home = homedir()
+  // a sign-in another test file left here is not this one's: the file order is not fixed
+  clearDesktopAuth()
   ;({ WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } = await import("./index.ts"))
 })
 // nothing leaves the machine; the fetch this file found is put back when
@@ -122,28 +122,30 @@ test("a token near its end is renewed and saved, as the loader does", async () =
 })
 
 test("the desktop's sign-in is renewed in memory only", async () => {
-  const dir = process.platform === "darwin" ? join(home, "Library", "Application Support", "CodeBuddyExtension")
-    : process.platform === "win32" ? join(home, "AppData", "Local", "CodeBuddyExtension") : join(home, ".local", "share", "CodeBuddyExtension")
-  mkdirSync(join(dir, "Data", "Public", "auth"), { recursive: true })
-  const file = join(dir, "Data", "Public", "auth", "workbuddy-desktop.info")
+  const file = desktopAuthFile("workbuddy-desktop.info")
   const info = JSON.stringify({ auth: { accessToken: "desk-old", refreshToken: "desk-refresh", expiresAt: Date.now() + 1000, domain: "www.codebuddy.cn" },
     account: { uid: "u1", nickname: "旅行者" } })
   writeFileSync(file, info)
-  const sets = []
-  const calls = serve({
-    "/v2/plugin/auth/token/refresh": () => ok({ accessToken: "desk-new", expiresIn: 3600 }),
-    "/billing/meter/get-user-resource-summary": () => ok(PAID),
-  })
-  const auth = { type: "oauth", access: "", refresh: "", expires: 0, source: "desktop", uid: "u1" }
-  const client = { auth: { set: async (x) => sets.push(x) } }
-  expect(await usageOf(WorkBuddyAuthPlugin, auth, client)).toEqual({ signIn: "kept", plan: "Pro", windows: [{ name: "Credits", used: 25, display: "2500 / 10000", amount: 2500, limit: 10000, unit: "credits" }] })
-  expect(calls[1].headers.get("authorization")).toBe("Bearer desk-new")
-  expect(calls[1].headers.get("x-domain")).toBe("www.codebuddy.cn")
-  expect(sets).toEqual([]) // never saved,
-  expect(readFileSync(file, "utf8")).toBe(info) // nor written where the app keeps it
-  // and held: the next ask doesn't renew again
-  await usageOf(WorkBuddyAuthPlugin, auth, client)
-  expect(calls.filter((c) => c.url.pathname.endsWith("/refresh")).length).toBe(1)
+  try {
+    const sets = []
+    const calls = serve({
+      "/v2/plugin/auth/token/refresh": () => ok({ accessToken: "desk-new", expiresIn: 3600 }),
+      "/billing/meter/get-user-resource-summary": () => ok(PAID),
+    })
+    const auth = { type: "oauth", access: "", refresh: "", expires: 0, source: "desktop", uid: "u1" }
+    const client = { auth: { set: async (x) => sets.push(x) } }
+    expect(await usageOf(WorkBuddyAuthPlugin, auth, client)).toEqual({ signIn: "kept", plan: "Pro", windows: [{ name: "Credits", used: 25, display: "2500 / 10000", amount: 2500, limit: 10000, unit: "credits" }] })
+    expect(calls[1].headers.get("authorization")).toBe("Bearer desk-new")
+    expect(calls[1].headers.get("x-domain")).toBe("www.codebuddy.cn")
+    expect(sets).toEqual([]) // never saved,
+    expect(readFileSync(file, "utf8")).toBe(info) // nor written where the app keeps it
+    // and held: the next ask doesn't renew again
+    await usageOf(WorkBuddyAuthPlugin, auth, client)
+    expect(calls.filter((c) => c.url.pathname.endsWith("/refresh")).length).toBe(1)
+  } finally {
+    // the app is signed out again for the next test and the next test file
+    rmSync(file, { force: true })
+  }
 })
 
 test("a desktop sign-in with the app signed out says why it failed", async () => {
@@ -156,24 +158,24 @@ test("a desktop sign-in with the app signed out says why it failed", async () =>
 // plugins#18 (seavenlin, WorkBuddy desktop 5.8.1): a sign-in the app seals
 // at rest read as "isn't signed in", while the app was signed in
 test("a desktop sign-in the app keeps encrypted says so, and that the browser sign-in is the way", async () => {
-  const dir = process.platform === "darwin" ? join(home, "Library", "Application Support", "CodeBuddyExtension")
-    : process.platform === "win32" ? join(home, "AppData", "Local", "CodeBuddyExtension") : join(home, ".local", "share", "CodeBuddyExtension")
-  mkdirSync(join(dir, "Data", "Public", "auth"), { recursive: true })
-  const file = join(dir, "Data", "Public", "auth", "workbuddy-desktop-ai.info")
+  const file = desktopAuthFile("workbuddy-desktop-ai.info")
   const sealed = { $wbEncrypted: 1, envelope: "AAAA" }
   const info = JSON.stringify({ auth: { accessToken: sealed, refreshToken: sealed, expiresAt: Date.now() + 3600_000 }, account: { uid: "u9", nickname: "x" } })
   writeFileSync(file, info)
-  const want = 'WorkBuddy AI desktop keeps its sign-in encrypted (WorkBuddy 5.6 and later), which magpie can\'t read; sign in with "WorkBuddy AI account (browser)" instead'
-  const p = await WorkBuddyAIAuthPlugin({ client: {} })
-  const m = p.auth.methods.find((x) => x.label.endsWith("desktop's sign-in"))
-  expect(await (await m.authorize()).callback()).toEqual({ type: "failed", error: want })
-  // one signed in before the app sealed it: its usage and chats say the same
-  const auth = { type: "oauth", access: "", refresh: "", expires: 0, source: "desktop", uid: "u9" }
-  expect((await usageOf(WorkBuddyAIAuthPlugin, auth, { auth: { set: async () => {} } })).error).toBe(want)
-  const opts = await p.auth.loader(async () => auth)
-  await expect(chatFetch(opts)(opts.baseURL + "/chat/completions", { method: "POST", body: "{}" })).rejects.toThrow(want)
-  expect(readFileSync(file, "utf8")).toBe(info)
-  rmSync(file)
+  try {
+    const want = 'WorkBuddy AI desktop keeps its sign-in encrypted (WorkBuddy 5.6 and later), which magpie can\'t read; sign in with "WorkBuddy AI account (browser)" instead'
+    const p = await WorkBuddyAIAuthPlugin({ client: {} })
+    const m = p.auth.methods.find((x) => x.label.endsWith("desktop's sign-in"))
+    expect(await (await m.authorize()).callback()).toEqual({ type: "failed", error: want })
+    // one signed in before the app sealed it: its usage and chats say the same
+    const auth = { type: "oauth", access: "", refresh: "", expires: 0, source: "desktop", uid: "u9" }
+    expect((await usageOf(WorkBuddyAIAuthPlugin, auth, { auth: { set: async () => {} } })).error).toBe(want)
+    const opts = await p.auth.loader(async () => auth)
+    await expect(chatFetch(opts)(opts.baseURL + "/chat/completions", { method: "POST", body: "{}" })).rejects.toThrow(want)
+    expect(readFileSync(file, "utf8")).toBe(info)
+  } finally {
+    rmSync(file, { force: true })
+  }
 })
 
 // Each model carries the credits WorkBuddy's picker shows by it, as
