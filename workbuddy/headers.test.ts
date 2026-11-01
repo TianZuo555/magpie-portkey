@@ -4,7 +4,7 @@
 // on the SDK's marks, the trace, the ACP connection, and the marks that say
 // the request is the client's own. Nothing here leaves the machine.
 import { afterEach, expect, test } from "bun:test"
-import { mkdirSync, writeFileSync, utimesSync } from "node:fs"
+import { mkdirSync, writeFileSync, utimesSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { gunzipSync } from "node:zlib"
@@ -168,4 +168,7 @@ test("a device token the sidecar wrote goes out as the desktop's own, stale or n
   _internal.tokenForget()
   h = await ask({ model: "glm-5.3", stream: true, messages: [{ role: "user", content: "again" }] })
   expect(h.get("X-Device-Token")).toBeNull()
+  // no token for the next test file either: the sidecar's file is not kept
+  rmSync(join(homedir(), ".local", "share", "workbuddy-turing"), { recursive: true, force: true })
+  _internal.tokenForget()
 })

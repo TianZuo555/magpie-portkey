@@ -8,10 +8,9 @@
 // WWW-Authenticate error="invalid_token"; a refresh token it doesn't take
 // gets HTTP 401 {"code":12153, "msg":"...invalid_grant..."}.
 import { test, expect, afterAll, afterEach } from "bun:test"
-import { mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs"
+import { writeFileSync, rmSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
-import { setFetch, chatFetch } from "./test-helpers.ts"
+import { setFetch, chatFetch, desktopAuthFile } from "./test-helpers.ts"
 import { WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } from "./index.ts"
 
 // the loader tests sign in: no real sign-in may be read
@@ -192,10 +191,7 @@ test("a 401 on a later try of the same request (after a 400 the request is sent 
 })
 
 function desktopFile(name, info) {
-  const dir = process.platform === "darwin" ? join(homedir(), "Library", "Application Support", "CodeBuddyExtension")
-    : process.platform === "win32" ? join(homedir(), "AppData", "Local", "CodeBuddyExtension") : join(homedir(), ".local", "share", "CodeBuddyExtension")
-  mkdirSync(join(dir, "Data", "Public", "auth"), { recursive: true })
-  const file = join(dir, "Data", "Public", "auth", name)
+  const file = desktopAuthFile(name)
   writeFileSync(file, JSON.stringify(info))
   return file
 }

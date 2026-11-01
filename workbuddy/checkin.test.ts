@@ -3,18 +3,21 @@
 // the event's status first, a claim only while it runs and today's isn't in,
 // the event's own codes 1001/1002/1003 read as answers for the day, and a 401
 // as a sign-in to make again.
-import { setFetch, type Call } from "./test-helpers.ts"
+import { setFetch, clearDesktopAuth, type Call } from "./test-helpers.ts"
 import type { Account, Checkin } from "./types.ts"
 import { test, expect, afterAll, beforeAll, afterEach } from "bun:test"
 import { homedir, tmpdir } from "node:os"
 import { realpathSync } from "node:fs"
 
-let WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal, home
+let WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal
 beforeAll(async () => {
   // Bun reads HOME once, at start: run as HOME=$(mktemp -d) bun test, so
   // no real sign-in is ever read
   if (![tmpdir(), realpathSync(tmpdir())].some((t) => homedir().startsWith(t))) throw new Error("run with HOME=$(mktemp -d) bun test")
-  home = homedir()
+  // a desktop sign-in another test file left here is not this one's: the file
+  // order is the filesystem's, and the check-in says "isn't signed in" when
+  // the app keeps none
+  clearDesktopAuth()
   ;({ WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal } = await import("./index.ts"))
 })
 // nothing leaves the machine; the fetch this file found is put back when
