@@ -33,7 +33,7 @@ Configure your gateway URL and AWS route before making requests, as described be
 magpie claude portkey-aws/us.anthropic.claude-opus-4-8
 ```
 
-This requires a Magpie version with pi package support. Magpie installs Bun, the plugin’s runtime dependencies and its pi runtime when needed. For local development:
+This requires a Magpie version with pi package support. Magpie installs Bun, the plugin’s runtime dependencies and its pi runtime when needed. To run the plugin from a local checkout:
 
 ```sh
 git clone https://github.com/TianZuo555/magpie-portkey.git
@@ -42,7 +42,9 @@ npm install --ignore-scripts
 magpie plugin add "$PWD"
 ```
 
-To reload edits in the app, turn this plugin off and on in Plugins.
+Magpie loads a path plugin in place. It makes no copy under `plugins/node_modules`, so the checkout is the code the gateway runs. To reload edits, turn the plugin off and on in Plugins.
+
+To update a path plugin, run `git pull` in the checkout, then turn the plugin off and on again. Your gateway settings live outside the checkout, in `~/.config/magpie/portkey.json`, so an update cannot touch them.
 
 ## Configure your gateway
 
@@ -57,13 +59,37 @@ The package ships this public default in `config.json`:
 }
 ```
 
-Create `config.local.json` beside `index.ts` to override it. That file is ignored by git and excluded from the npm package. You can also set `PORTKEY_CONFIG_PATH` to an absolute configuration file path in Magpie’s launch environment. Loading order is `PORTKEY_CONFIG_PATH`, then `config.local.json`, then `config.json`; each selects a complete configuration file.
+Do not edit `config.json` in the package. Put your values in `~/.config/magpie/portkey.json`.
+
+The plugin reads the first of these files that exists:
+
+| Order | File | Use |
+| ---: | --- | --- |
+| 1 | the path in `PORTKEY_CONFIG_PATH` | One file you name. Set the variable in Magpie’s launch environment. |
+| 2 | `~/.config/magpie/portkey.json` | Your own gateway. **Use this one.** No install or update replaces it. |
+| 3 | `config.local.json` in the folder with `index.ts` | For a checkout. Git ignores it. A plugin update rebuilds a github or npm install, so a file there can go away. |
+| 4 | `config.json` in the package | The public default. Do not edit it. |
+
+Each file is a complete configuration. The plugin does not merge them. The file holds no secret: Magpie’s sign-in holds the API key.
+
+A company gateway needs its own file, for example `~/.config/magpie/portkey.json`:
+
+```json
+{
+  "baseUrl": "https://your-gateway.example.com/v1",
+  "apiKeyEnv": "PORTKEY_API_KEY",
+  "provider": "@aws-bedrock-use2",
+  "headers": {}
+}
+```
 
 - `baseUrl`: your Portkey gateway’s Bedrock-compatible base URL. Requests go to `/model/{encoded model id}/converse-stream`.
 - `apiKeyEnv`: environment fallback when pi has no saved key. In Magpie, use API-key sign-in so the menu bar app does not need your shell environment.
-- `provider`: optional `x-portkey-provider` route. Set this to your configured Portkey AWS provider slug, such as `@your-aws-provider`, when using a provider integration.
+- `provider`: optional `x-portkey-provider` route. Leave it out to send no header. The public default is `aws-bedrock`. A company gateway usually serves Bedrock through one provider integration that already exists in that gateway, and the value is the integration slug with a leading `@`, for example `@aws-bedrock-use2`. A wrong value fails with `HTTP 400` and the message `Invalid provider passed`.
 - `configId`: optional `x-portkey-config` configuration id. Use a route or configuration with AWS credentials already configured in Portkey.
 - `headers`: additional non-secret gateway headers.
+
+Troubleshooting: `Invalid provider passed` means `provider` does not match the gateway. A `403` with `Portkey Error: Forbidden` means the gateway rejected the key, not the URL.
 
 Credentials belong in Magpie’s sign-in or the environment. The reader rejects API keys and secret headers embedded in JSON. Requests send the selected account’s key as both `Authorization: Bearer …` and `x-portkey-api-key`. Restart the plugin after configuration changes.
 

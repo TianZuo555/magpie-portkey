@@ -29,14 +29,18 @@ import {
 } from "@earendil-works/pi-ai";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PROVIDER_ID = "portkey-aws";
 const API_ID = "portkey-aws-ai-sdk" as Api;
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
+const MAGPIE_CONFIG_PATH = join(homedir(), ".config", "magpie", "portkey.json");
 const LOCAL_CONFIG_PATH = join(EXTENSION_DIR, "config.local.json");
-const CONFIG_PATH = existsSync(LOCAL_CONFIG_PATH) ? LOCAL_CONFIG_PATH : join(EXTENSION_DIR, "config.json");
+const CONFIG_PATH =
+  [MAGPIE_CONFIG_PATH, LOCAL_CONFIG_PATH, join(EXTENSION_DIR, "config.json")].find((path) => existsSync(path)) ??
+  join(EXTENSION_DIR, "config.json");
 const MODELS_PATH = join(EXTENSION_DIR, "models.json");
 
 // Anthropic models on Bedrock only cache at explicit checkpoints. Without these
