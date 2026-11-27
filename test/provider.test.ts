@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { normalizeContext, type Api, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import plugin, { createPortkeyStream, readConfig } from "../index.ts";
 import { end, textEvents, wireResponse, type WireEvent } from "./wire.ts";
@@ -179,6 +180,8 @@ test("configuration matches pi's catalog and rejects embedded secrets", () => {
   const config = readConfig();
   assert.equal(config.models.length, 6);
   assert.equal(config.headers["x-portkey-provider"], config.provider);
+  const shipped = readConfig(fileURLToPath(new URL("../config.json", import.meta.url)), fileURLToPath(new URL("../models.json", import.meta.url)));
+  assert.equal(shipped.headers["x-portkey-debug"], "false", "the package sends DO NOT TRACK, so Portkey Logs hold no prompt");
   const temp = mkdtempSync(join(tmpdir(), "portkey-config-"));
   try {
     const path = join(temp, "config.json");

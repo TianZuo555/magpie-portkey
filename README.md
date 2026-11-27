@@ -55,7 +55,7 @@ The package ships this public default in `config.json`:
   "baseUrl": "https://api.portkey.ai/v1",
   "apiKeyEnv": "PORTKEY_API_KEY",
   "provider": "aws-bedrock",
-  "headers": {}
+  "headers": { "x-portkey-debug": "false" }
 }
 ```
 
@@ -79,7 +79,7 @@ A company gateway needs its own file, for example `~/.config/magpie/portkey.json
   "baseUrl": "https://your-gateway.example.com/v1",
   "apiKeyEnv": "PORTKEY_API_KEY",
   "provider": "@aws-bedrock-use2",
-  "headers": {}
+  "headers": { "x-portkey-debug": "false" }
 }
 ```
 
@@ -88,6 +88,8 @@ A company gateway needs its own file, for example `~/.config/magpie/portkey.json
 - `provider`: optional `x-portkey-provider` route. Leave it out to send no header. The public default is `aws-bedrock`. A company gateway usually serves Bedrock through one provider integration that already exists in that gateway, and the value is the integration slug with a leading `@`, for example `@aws-bedrock-use2`. A wrong value fails with `HTTP 400` and the message `Invalid provider passed`.
 - `configId`: optional `x-portkey-config` configuration id. Use a route or configuration with AWS credentials already configured in Portkey.
 - `headers`: additional non-secret gateway headers.
+
+`x-portkey-debug: false` is Portkey’s DO NOT TRACK. The gateway records tokens, cost and latency, and records no request or reply content. The public default sends it, so Portkey Logs answer what a request cost, not what the user said. Set `"x-portkey-debug": "true"` in your own file to record the full request and the full reply. Do that only where the prompt may be stored.
 
 Troubleshooting: `Invalid provider passed` means `provider` does not match the gateway. A `403` with `Portkey Error: Forbidden` means the gateway rejected the key, not the URL.
 
